@@ -1,0 +1,5 @@
+{
+  "name": "Provision ISR",
+  "render_readme": true,
+  "domains": ["camera", "binary_sensor", "switch"]
+}

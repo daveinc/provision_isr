@@ -1,0 +1,12 @@
+{
+  "domain": "provision_isr",
+  "name": "Provision ISR",
+  "codeowners": ["@YOUR_GITHUB_USERNAME"],
+  "config_flow": true,
+  "documentation": "https://github.com/YOUR_GITHUB_USERNAME/provision-isr",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/YOUR_GITHUB_USERNAME/provision-isr/issues",
+  "requirements": ["httpx>=0.27.0"],
+  "version": "0.1.0"
+}
