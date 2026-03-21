@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Provision ISR Device",
+        "description": "Found {discovered_count} device(s) on your network. Select a device or choose Manual Entry.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "credentials": {
+        "title": "Enter Credentials",
+        "description": "Enter credentials for {model} at {host}:{port}",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "manual": {
+        "title": "Manual Device Setup",
+        "description": "Enter your Provision ISR device details",
+        "data": {
+          "host": "Host (IP Address)",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to device. Check host and port.",
+      "invalid_auth": "Invalid username or password",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Provision ISR Options",
+        "data": {
+          "auto_detect_ip": "Auto-detect IP changes on restart (requires MAC match)"
+        }
+      }
+    }
+  }
+}
