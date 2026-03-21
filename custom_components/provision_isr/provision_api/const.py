@@ -1,64 +1,23 @@
-"""Constants for Provision ISR API."""
+"""Constants for Provision ISR API client."""
 
-from typing import Final
+# HTTP Status Codes
+HTTP_OK = 200
+HTTP_BAD_REQUEST = 400
+HTTP_UNAUTHORIZED = 401
 
-# HTTP Methods
-GET: Final = "GET"
-POST: Final = "POST"
-PUT: Final = "PUT"
+# Timeouts
+DEFAULT_TIMEOUT = 30  # seconds
 
-# Connection types
-CONNECTION_TYPE_DIRECT: Final = "Direct"
-CONNECTION_TYPE_PROXIED: Final = "Proxied"
+# API Endpoints
+ENDPOINT_GET_DEVICE_INFO = "GetDeviceInfo"
+ENDPOINT_GET_CHANNEL_LIST = "GetChannelList"
+ENDPOINT_GET_DISK_INFO = "GetDiskInfo"
+ENDPOINT_GET_ALARM_IN_LIST = "GetAlarmInList"
+ENDPOINT_GET_ALARM_OUT_LIST = "GetAlarmOutList"
+ENDPOINT_GET_DATE_TIME = "GetDateAndTime"
 
-# Stream types
-STREAM_TYPE: Final = {
-    1: "Main Stream",
-    2: "Sub-stream",
-}
-
-# Event types
-EVENT_BASIC: Final = "basic"
-EVENT_SMART: Final = "smart"
-EVENT_IO: Final = "io"
-
-# Events dictionary (Provision ISR specific)
-EVENTS: Final = {
-    "motiondetection": {
-        "type": EVENT_BASIC,
-        "label": "Motion",
-        "device_class": "motion",
-    },
-    "tamperdetection": {
-        "type": EVENT_BASIC,
-        "label": "Video Tampering",
-        "device_class": "tamper",
-    },
-    "videoloss": {
-        "type": EVENT_BASIC,
-        "label": "Video Loss",
-        "device_class": "problem",
-    },
-    "fielddetection": {
-        "type": EVENT_SMART,
-        "label": "Intrusion",
-        "device_class": "motion",
-    },
-    "linedetection": {
-        "type": EVENT_SMART,
-        "label": "Line Crossing",
-        "device_class": "motion",
-    },
-    "io": {
-        "type": EVENT_IO,
-        "label": "Alarm Input",
-        "device_class": "safety",
-    },
-}
-
-# API Endpoints (will need adjustment based on actual Provision API)
-ENDPOINT_DEVICE_INFO: Final = "System/deviceInfo"
-ENDPOINT_CAPABILITIES: Final = "System/capabilities"
-ENDPOINT_CHANNELS: Final = "System/Video/inputs/channels"
-ENDPOINT_STREAMING: Final = "Streaming/channels"
-ENDPOINT_MOTION: Final = "System/Video/inputs/channels/{}/motionDetection"
+# Device Types (from GetDeviceInfo deviceType field)
+# TODO: Map these values based on API testing
+DEVICE_TYPE_IPC = 1  # IP Camera
+DEVICE_TYPE_NVR = 2  # NVR (placeholder)
+DEVICE_TYPE_DVR = 3  # DVR (placeholder)
