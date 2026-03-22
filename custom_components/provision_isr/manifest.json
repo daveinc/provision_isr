@@ -1,12 +1,12 @@
 {
   "domain": "provision_isr",
-  "name": "Provision ISR",
+  "name": "Provision ISR", 
   "codeowners": ["@daveinc"],
   "config_flow": true,
+  "dependencies": [],
   "documentation": "https://github.com/daveinc/provision_isr",
-  "integration_type": "hub",
-  "iot_class": "local_push",
-  "issue_tracker": "https://github.com/daveinc/provision_isr/issues",
-  "requirements": ["httpx>=0.24.0", "xmltodict>=0.13.0"],
-  "version": "0.1.0"
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "requirements": ["httpx", "xmltodict"],
+  "version": "1.0.0"
 }
