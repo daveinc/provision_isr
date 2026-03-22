@@ -8,7 +8,7 @@ from .exceptions import (
     PermissionDeniedError,
     ProvisionError,
 )
-from .models import ChannelList, DeviceInfo, DiskInfo, StreamCaps, StreamInfo, DeviceCapabilities
+from .models import ChannelList, DeviceInfo, DiskInfo, StreamCaps, DeviceCapabilities
 from .provision_client import ProvisionClient
 
 __all__ = [
