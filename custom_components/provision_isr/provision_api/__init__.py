@@ -17,7 +17,6 @@ __all__ = [
     "ChannelList",
     "DiskInfo",
     "StreamCaps",
-    "StreamInfo",
     "DeviceCapabilities",
     "ProvisionError",
     "AuthenticationError",
