@@ -152,10 +152,17 @@ class ProvisionLongPolling:
         
         try:
             response = await self._client.post(
-                f"{self._base_url}/SetSubscribe",
+                f"{self._polling_url}/SetSubscribe",
                 content=xml_data,
                 headers={"Content-Type": "application/xml; charset=UTF-8"},
             )
+            
+            if response.status_code == 404:
+                _LOGGER.warning(
+                    "Camera does not support SetSubscribe endpoint. "
+                    "Long polling not available on this camera model."
+                )
+                return False
             
             if response.status_code != 200:
                 _LOGGER.error("Subscription failed: HTTP %s", response.status_code)
@@ -191,7 +198,7 @@ class ProvisionLongPolling:
         
         try:
             await self._client.post(
-                f"{self._base_url}/SetUnSubscribe",
+                f"{self._polling_url}/SetUnSubscribe",
                 content=xml_data,
                 headers={"Content-Type": "application/xml; charset=UTF-8"},
             )
@@ -215,7 +222,7 @@ class ProvisionLongPolling:
 </config>"""
                 
                 response = await self._client.post(
-                    f"{self._base_url}/SetRenew",
+                    f"{self._polling_url}/SetRenew",
                     content=xml_data,
                     headers={"Content-Type": "application/xml; charset=UTF-8"},
                 )
@@ -248,7 +255,7 @@ class ProvisionLongPolling:
                 
                 # Long poll for events (blocks until event or timeout)
                 response = await self._client.post(
-                    f"{self._base_url}/GetPullMessages",
+                    f"{self._polling_url}/GetPullMessages",
                     content=xml_data,
                     headers={"Content-Type": "application/xml; charset=UTF-8"},
                 )
