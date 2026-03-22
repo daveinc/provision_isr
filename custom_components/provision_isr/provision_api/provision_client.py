@@ -23,7 +23,7 @@ from .exceptions import (
     PermissionDeniedError,
     ProvisionError,
 )
-from .models import DeviceInfo, ChannelList, DiskInfo
+from .models import DeviceInfo, ChannelList, DiskInfo, StreamCaps
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +110,49 @@ class ProvisionClient:
         response = await self._request("GetDiskInfo")
         config = response.get("config", {})
         return DiskInfo.from_dict(config)
+
+    async def get_stream_caps(self, channel_id: int = 1) -> StreamCaps:
+        """Get stream capabilities for a channel.
+        
+        Args:
+            channel_id: Channel ID (default: 1)
+            
+        Returns:
+            StreamCaps object with stream information
+        """
+        endpoint = f"GetStreamCaps/{channel_id}" if channel_id > 1 else "GetStreamCaps"
+        response = await self._request(endpoint)
+        config = response.get("config", {})
+        return StreamCaps.from_dict(config)
+
+    async def get_snapshot(self, channel_id: int = 1) -> bytes:
+        """Get snapshot image for a channel.
+        
+        Args:
+            channel_id: Channel ID (default: 1)
+            
+        Returns:
+            JPEG image bytes
+        """
+        endpoint = f"GetSnapshot/{channel_id}" if channel_id > 1 else "GetSnapshot"
+        url = f"{self._base_url}/{endpoint}"
+        client = await self._get_client()
+        
+        try:
+            response = await client.get(url)
+            
+            if response.status_code == HTTP_UNAUTHORIZED:
+                raise AuthenticationError("Invalid username or password")
+            
+            if response.status_code != HTTP_OK:
+                raise ProvisionConnectionError(f"Snapshot failed: HTTP {response.status_code}")
+            
+            return response.content
+            
+        except httpx.TimeoutException as err:
+            raise ProvisionConnectionError(f"Snapshot timeout: {err}") from err
+        except httpx.RequestError as err:
+            raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
     async def close(self) -> None:
         """Close the HTTP client."""
