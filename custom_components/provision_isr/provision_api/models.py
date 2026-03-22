@@ -60,6 +60,9 @@ class DeviceCapabilities:
     support_anonymous_login: bool = False
     support_http_post: bool = False
     
+    # Channel count
+    chl_max_count: int = 1
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> DeviceCapabilities:
         """Create capabilities from device info XML data."""
@@ -119,6 +122,9 @@ class DeviceCapabilities:
             caps.support_watermark = device_info.get("supportWatermark", {}).get("#text", "false") == "true"
             caps.support_anonymous_login = device_info.get("supportAnonymousLogin", {}).get("#text", "false") == "true"
             caps.support_http_post = device_info.get("SupportHttpPost", {}).get("#text", "false") == "true"
+            
+            # Channel count
+            caps.chl_max_count = int(device_info.get("chlMaxCount", {}).get("#text", "1"))
         
         return caps
 
@@ -160,9 +166,7 @@ class DeviceInfo:
     
     def is_nvr(self) -> bool:
         """Check if device is an NVR (multiple channels)."""
-        # Simple heuristic: if it has more than 1 channel max, it's likely an NVR
-        # This will be refined when we get channel list
-        return self.capabilities.chl_max_count > 1 if hasattr(self.capabilities, 'chl_max_count') else False
+        return self.capabilities.chl_max_count > 1
     
     @property
     def support_motion_sens(self) -> bool:
@@ -171,3 +175,60 @@ class DeviceInfo:
 
 # Keep your existing Channel, ChannelList, DiskInfo, StreamCaps models below...
 # [Your existing Channel, ChannelList, DiskInfo, StreamCaps classes here]
+
+@dataclass
+class Channel:
+    """Channel information."""
+    channel_id: str
+    name: str
+    is_online: bool
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Channel:
+        return cls(
+            channel_id=data.get("@id", ""),
+            name=data.get("name", {}).get("#text", ""),
+            is_online=data.get("online", {}).get("#text", "false") == "true",
+        )
+
+@dataclass
+class ChannelList:
+    """Channel list for NVR."""
+    channels: List[Channel]
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ChannelList:
+        channels_data = data.get("channelList", {}).get("item", [])
+        if not isinstance(channels_data, list):
+            channels_data = [channels_data]
+        
+        channels = [Channel.from_dict(channel) for channel in channels_data]
+        return cls(channels=channels)
+
+@dataclass
+class DiskInfo:
+    """Disk information."""
+    total_size: int
+    free_size: int
+    used_size: int
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> DiskInfo:
+        return cls(
+            total_size=int(data.get("totalSize", {}).get("#text", "0")),
+            free_size=int(data.get("freeSize", {}).get("#text", "0")),
+            used_size=int(data.get("usedSize", {}).get("#text", "0")),
+        )
+
+@dataclass
+class StreamCaps:
+    """Stream capabilities."""
+    main_stream: Dict[str, Any]
+    sub_stream: Dict[str, Any]
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> StreamCaps:
+        return cls(
+            main_stream=data.get("mainStream", {}),
+            sub_stream=data.get("subStream", {}),
+        )
