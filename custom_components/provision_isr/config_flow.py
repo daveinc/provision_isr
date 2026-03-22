@@ -1,15 +1,18 @@
 """Config flow for Provision ISR integration."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant import config_entries
+
+from homeassistant.config_entries import (
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -34,7 +37,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-class ProvisionISRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Provision ISR."""
 
     VERSION = 1
@@ -46,7 +49,7 @@ class ProvisionISRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step - discovery."""
         if user_input is not None:
             # User selected a device or manual entry
@@ -89,7 +92,7 @@ class ProvisionISRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_credentials(
         self, device_info: dict[str, Any], user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle credentials entry for discovered device."""
         errors = {}
         
@@ -132,7 +135,7 @@ class ProvisionISRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_manual(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle manual device entry."""
         errors = {}
         
@@ -212,22 +215,22 @@ class ProvisionISRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
+        config_entry,
     ) -> ProvisionISROptionsFlow:
         """Get the options flow for this handler."""
         return ProvisionISROptionsFlow(config_entry)
 
 
-class ProvisionISROptionsFlow(config_entries.OptionsFlow):
+class ProvisionISROptionsFlow(OptionsFlow):
     """Handle options flow for Provision ISR."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self, config_entry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
