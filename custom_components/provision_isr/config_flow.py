@@ -218,15 +218,11 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry,
     ) -> ProvisionISROptionsFlow:
         """Get the options flow for this handler."""
-        return ProvisionISROptionsFlow(config_entry)
+        return ProvisionISROptionsFlow()
 
 
 class ProvisionISROptionsFlow(OptionsFlow):
     """Handle options flow for Provision ISR."""
-
-    def __init__(self, config_entry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
