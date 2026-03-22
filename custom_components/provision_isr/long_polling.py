@@ -234,8 +234,20 @@ class ProvisionLongPolling:
                     
             except asyncio.CancelledError:
                 break
+            except (httpx.RemoteProtocolError, httpx.ReadError) as err:
+                # Connection dropped during renewal - camera might reset connection
+                # This is normal, subscription likely still valid
+                _LOGGER.debug("Connection reset during renewal (normal): %s", err)
             except Exception as err:
                 _LOGGER.error("Error renewing subscription: %s", err)
+                # Try to re-subscribe if renewal keeps failing
+                try:
+                    if not await self._subscribe():
+                        _LOGGER.error("Failed to re-subscribe, stopping")
+                        self._running = False
+                        break
+                except Exception:
+                    pass
 
     async def _poll_events(self) -> None:
         """Poll for events continuously."""
