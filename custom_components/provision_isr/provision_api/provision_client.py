@@ -154,6 +154,58 @@ class ProvisionClient:
         except httpx.RequestError as err:
             raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
+    async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
+        """Get motion detection configuration.
+        
+        Args:
+            channel_id: Channel ID (default: 1)
+            
+        Returns:
+            Motion configuration dict
+        """
+        endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
+        response = await self._request(endpoint)
+        config = response.get("config", {})
+        return config.get("motion", {})
+
+    async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
+        """Enable or disable motion detection.
+        
+        Args:
+            enabled: True to enable, False to disable
+            channel_id: Channel ID (default: 1)
+            
+        Returns:
+            True if successful
+        """
+        # First get current config
+        motion_config = await self.get_motion_config(channel_id)
+        
+        # Update switch value
+        motion_config["switch"] = enabled
+        
+        # Build XML request
+        xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
+    <motion>
+        <switch>{str(enabled).lower()}</switch>
+    </motion>
+</config>"""
+        
+        endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
+        await self._request(endpoint, method="POST", data=xml_data)
+        return True
+
+    async def get_alarm_status(self) -> dict[str, Any]:
+        """Get current alarm status.
+        
+        Returns:
+            Alarm status dict with motion, sensor, and other alarms
+        """
+        response = await self._request("GetAlarmStatus")
+        config = response.get("config", {})
+        return config.get("alarmStatusInfo", {})
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client:
