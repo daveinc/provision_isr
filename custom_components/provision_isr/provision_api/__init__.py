@@ -8,7 +8,7 @@ from .exceptions import (
     PermissionDeniedError,
     ProvisionError,
 )
-from .models import ChannelList, DeviceInfo, DiskInfo, StreamCaps, StreamInfo
+from .models import ChannelList, DeviceInfo, DiskInfo, StreamCaps, StreamInfo, DeviceCapabilities
 from .provision_client import ProvisionClient
 
 __all__ = [
@@ -18,11 +18,13 @@ __all__ = [
     "DiskInfo",
     "StreamCaps",
     "StreamInfo",
+    "DeviceCapabilities",
     "ProvisionError",
     "AuthenticationError",
     "ConnectionError",
     "InvalidRequestError",
     "InvalidXMLFormatError",
+    "InvalidXMLContent",
     "InvalidXMLContentError",
     "PermissionDeniedError",
 ]
