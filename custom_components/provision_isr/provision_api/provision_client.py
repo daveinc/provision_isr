@@ -81,15 +81,24 @@ class ProvisionClient:
         """Get device information.
         
         Returns:
-            DeviceInfo object with device details
+            DeviceInfo object with device details and capabilities
         """
         response = await self._request("GetDeviceInfo")
         
-        # Navigate to deviceInfo in the XML response
-        config = response.get("config", {})
-        device_data = config.get("deviceInfo", {})
+        # Log the raw response for debugging capabilities
+        _LOGGER.debug("GetDeviceInfo raw response: %s", response)
         
-        return DeviceInfo.from_dict(device_data)
+        # The entire response should be passed to DeviceInfo.from_dict
+        # It will extract deviceInfo section and parse capabilities
+        device_info = DeviceInfo.from_dict(response)
+        
+        _LOGGER.info("Device capabilities: motion=%s, PEA=%s, AVD=%s, OSC=%s", 
+                     device_info.capabilities.support_motion_sens,
+                     device_info.capabilities.support_pea,
+                     device_info.capabilities.support_avd,
+                     device_info.capabilities.support_osc)
+        
+        return device_info
 
     async def get_channel_list(self) -> ChannelList:
         """Get channel list (NVR only).
@@ -291,15 +300,19 @@ class ProvisionClient:
         
         return '\n            '.join(xml_items)
 
-    async def get_alarm_status(self) -> dict[str, Any]:
+    async def get_alarm_status(self, channel_id: int = 1) -> dict[str, Any]:
         """Get current alarm status.
         
+        Args:
+            channel_id: Channel ID (default: 1)
+            
         Returns:
             Alarm status dict with motion, sensor, and other alarms
         """
-        response = await self._request("GetAlarmStatus")
+        endpoint = f"GetAlarmStatus/{channel_id}" if channel_id > 1 else "GetAlarmStatus"
+        response = await self._request(endpoint)
         config = response.get("config", {})
-        return config.get("alarmStatusInfo", {})
+        return config.get("alarmStatusInfo", config)
 
     async def close(self) -> None:
         """Close the HTTP client."""
