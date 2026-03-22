@@ -67,6 +67,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_info": device_info,
     }
     
+    # Start long polling for motion events if supported
+    if device_info.support_api_long_polling and device_info.support_motion_sens:
+        from .long_polling import ProvisionLongPolling
+        
+        try:
+            long_polling = ProvisionLongPolling(
+                host=entry.data[CONF_HOST],
+                port=entry.data[CONF_PORT],
+                username=entry.data[CONF_USERNAME],
+                password=entry.data[CONF_PASSWORD],
+            )
+            
+            if await long_polling.start():
+                hass.data[DOMAIN][entry.entry_id]["long_polling"] = long_polling
+                _LOGGER.info("Long polling started for motion events")
+            else:
+                _LOGGER.warning("Failed to start long polling")
+                
+        except Exception as err:
+            _LOGGER.warning("Failed to set up long polling: %s", err)
+    
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
@@ -78,6 +99,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Unload platforms
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        # Stop long polling if running
+        if "long_polling" in hass.data[DOMAIN][entry.entry_id]:
+            long_polling = hass.data[DOMAIN][entry.entry_id]["long_polling"]
+            await long_polling.stop()
+        
         # Close client connection
         client = hass.data[DOMAIN][entry.entry_id]["client"]
         await client.close()
