@@ -279,27 +279,40 @@ class ProvisionBinarySensor(BinarySensorEntity):
             _LOGGER.error("Error processing alarm data for %s: %s", 
                          self._attr_unique_id, err)
 
-    def _extract_alarm_state(self, alarm_data: dict[str, Any]) -> bool | None:
+    def _extract_alarm_state(self, alarm_status: dict[str, Any]) -> bool | None:
         """Extract alarm state for this specific sensor type."""
         # Get the alarm status info
-        alarm_status = alarm_data.get("alarmStatusInfo", alarm_data)
+        alarm_status_info = alarm_status.get("alarmStatusInfo", alarm_status)
         
         # Handle different sensor types
         if self._sensor_type == "motion":
-            return self._extract_motion_state(alarm_status)
+            return self._extract_motion_state(alarm_status_info)
         elif self._sensor_type == "sensor_input" and self._input_index is not None:
-            return self._extract_sensor_input_state(alarm_status)
+            return self._extract_sensor_input_state(alarm_status_info)
         elif self._sensor_type == "perimeter_alarm":
-            return self._extract_perimeter_state(alarm_status)
+            return self._extract_perimeter_state(alarm_status_info)
         elif self._sensor_type == "scene_change":
-            return self._extract_scene_change_state(alarm_status)
+            return self._extract_scene_change_state(alarm_status_info)
         elif self._sensor_type == "clarity_abnormal":
-            return self._extract_clarity_state(alarm_status)
+            return self._extract_clarity_state(alarm_status_info)
         elif self._sensor_type == "color_abnormal":
-            return self._extract_color_state(alarm_status)
+            return self._extract_color_state(alarm_status_info)
         elif self._sensor_type == "object_removal":
-            return self._extract_object_removal_state(alarm_status)
-        # Add more sensor type handlers as needed
+            return self._extract_object_removal_state(alarm_status_info)
+        elif self._sensor_type == "people_intrusion":
+            return self._extract_people_intrusion_state(alarm_status_info)
+        elif self._sensor_type == "people_counting":
+            return self._extract_people_counting_state(alarm_status_info)
+        elif self._sensor_type == "crowd_density":
+            return self._extract_crowd_density_state(alarm_status_info)
+        elif self._sensor_type == "face_detection":
+            return self._extract_face_detection_state(alarm_status_info)
+        elif self._sensor_type == "license_plate":
+            return self._extract_license_plate_state(alarm_status_info)
+        elif self._sensor_type == "region_entrance":
+            return self._extract_region_entrance_state(alarm_status_info)
+        elif self._sensor_type == "region_exiting":
+            return self._extract_region_exiting_state(alarm_status_info)
         
         _LOGGER.warning("No handler for sensor type: %s", self._sensor_type)
         return None
@@ -429,6 +442,146 @@ class ProvisionBinarySensor(BinarySensorEntity):
             osc_alarms = [osc_alarms]
         
         for alarm in osc_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_people_intrusion_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract people intrusion alarm state."""
+        ipd_alarms = alarm_status.get("ipdAlarm", [])
+        
+        if not isinstance(ipd_alarms, list):
+            ipd_alarms = [ipd_alarms]
+        
+        for alarm in ipd_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_people_counting_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract people counting alarm state."""
+        cpc_alarms = alarm_status.get("cpcAlarm", [])
+        
+        if not isinstance(cpc_alarms, list):
+            cpc_alarms = [cpc_alarms]
+        
+        for alarm in cpc_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_crowd_density_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract crowd density alarm state."""
+        cdd_alarms = alarm_status.get("cddAlarm", [])
+        
+        if not isinstance(cdd_alarms, list):
+            cdd_alarms = [cdd_alarms]
+        
+        for alarm in cdd_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_face_detection_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract face detection alarm state."""
+        vfd_alarms = alarm_status.get("vfdAlarm", [])
+        
+        if not isinstance(vfd_alarms, list):
+            vfd_alarms = [vfd_alarms]
+        
+        for alarm in vfd_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_license_plate_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract license plate detection alarm state."""
+        vehicle_alarms = alarm_status.get("vehicleAlarm", [])
+        
+        if not isinstance(vehicle_alarms, list):
+            vehicle_alarms = [vehicle_alarms]
+        
+        for alarm in vehicle_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_region_entrance_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract region entrance alarm state."""
+        aoi_entry_alarms = alarm_status.get("aoiEntryAlarm", [])
+        
+        if not isinstance(aoi_entry_alarms, list):
+            aoi_entry_alarms = [aoi_entry_alarms]
+        
+        for alarm in aoi_entry_alarms:
+            if isinstance(alarm, dict):
+                alarm_id = alarm.get("@id", "1")
+                alarm_state = alarm.get("#text", "false")
+            else:
+                alarm_id = "1"
+                alarm_state = str(alarm)
+            
+            if int(alarm_id) == self._channel_id:
+                return alarm_state.lower() == "true"
+        
+        return False
+
+    def _extract_region_exiting_state(self, alarm_status: dict[str, Any]) -> bool:
+        """Extract region exiting alarm state."""
+        aoi_leave_alarms = alarm_status.get("aoiLeaveAlarm", [])
+        
+        if not isinstance(aoi_leave_alarms, list):
+            aoi_leave_alarms = [aoi_leave_alarms]
+        
+        for alarm in aoi_leave_alarms:
             if isinstance(alarm, dict):
                 alarm_id = alarm.get("@id", "1")
                 alarm_state = alarm.get("#text", "false")
