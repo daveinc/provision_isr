@@ -81,24 +81,15 @@ class ProvisionClient:
         """Get device information.
         
         Returns:
-            DeviceInfo object with device details and capabilities
+            DeviceInfo object with device details
         """
         response = await self._request("GetDeviceInfo")
         
-        # Log the raw response for debugging capabilities
-        _LOGGER.debug("GetDeviceInfo raw response: %s", response)
+        # Navigate to deviceInfo in the XML response
+        config = response.get("config", {})
+        device_data = config.get("deviceInfo", {})
         
-        # The entire response should be passed to DeviceInfo.from_dict
-        # It will extract deviceInfo section and parse capabilities
-        device_info = DeviceInfo.from_dict(response)
-        
-        _LOGGER.info("Device capabilities: motion=%s, PEA=%s, AVD=%s, OSC=%s", 
-                     device_info.capabilities.support_motion_sens,
-                     device_info.capabilities.support_pea,
-                     device_info.capabilities.support_avd,
-                     device_info.capabilities.support_osc)
-        
-        return device_info
+        return DeviceInfo.from_dict(device_data)
 
     async def get_channel_list(self) -> ChannelList:
         """Get channel list (NVR only).
@@ -175,12 +166,7 @@ class ProvisionClient:
         endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
         response = await self._request(endpoint)
         config = response.get("config", {})
-        motion_config = config.get("motion", {})
-        
-        # Log the full config for debugging
-        _LOGGER.debug("Motion config for channel %s: %s", channel_id, motion_config)
-        
-        return motion_config
+        return config.get("motion", {})
 
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
@@ -195,124 +181,30 @@ class ProvisionClient:
         # First get current config
         motion_config = await self.get_motion_config(channel_id)
         
-        # Log the current config
-        _LOGGER.debug("Current motion config: %s", motion_config)
+        # Update switch value
+        motion_config["switch"] = enabled
         
-        # Extract values with defaults
-        switch = str(enabled).lower()
-        sensitivity = motion_config.get("sensitivity", {}).get("#text", "6")
-        alarm_hold_time = motion_config.get("alarmHoldTime", {}).get("#text", "3")
-        
-        # Handle area list
-        area_items = motion_config.get("area", {}).get("item", [])
-        if not isinstance(area_items, list):
-            area_items = [area_items]
-        
-        # Handle sensitivities list
-        sensitivity_items = motion_config.get("sensitivities", {}).get("item", [])
-        if not isinstance(sensitivity_items, list):
-            sensitivity_items = [sensitivity_items]
-        
-        # Build complete XML request with ALL required fields
+        # Build XML request
         xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
-<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
     <motion>
-        <switch type="boolean">{switch}</switch>
-        <sensitivity type="int32" min="1" max="8">{sensitivity}</sensitivity>
-        <alarmHoldTime type="uint32">{alarm_hold_time}</alarmHoldTime>
-        <area type="list" count="9">
-            <itemType type="string" minLen="16" maxLen="16"/>
-            {self._build_xml_items(area_items)}
-        </area>
-        <sensitivities type="list" count="9">
-            <itemType type="string" minLen="16" maxLen="16"/>
-            {self._build_xml_items(sensitivity_items)}
-        </sensitivities>
-        <triggerAlarmOut type="list" count="0">
-            <itemType type="boolean"/>
-        </triggerAlarmOut>
-        <mail type="list" count="0">
-            <switch type="boolean">false</switch>
-            <subject type="string" maxLen="63">
-                <![CDATA[]]>
-            </subject>
-            <content type="string" maxLen="255">
-                <![CDATA[]]>
-            </content>
-        </mail>
-        <ftp type="list" count="0">
-            <switch type="boolean">false</switch>
-        </ftp>
-        <sendPush>
-            <pushSwitch type="boolean">false</pushSwitch>
-            <recordSwitch type="boolean">false</recordSwitch>
-            <recordStreamIndex type="uint8">0</recordStreamIndex>
-            <sendPicSwitch type="boolean">false</sendPicSwitch>
-            <recordTime type="uint32">0</recordTime>
-            <pushContent type="string" maxLen="127">
-                <![CDATA[]]>
-            </pushContent>
-        </sendPush>
-        <audioSwitch type="boolean">false</audioSwitch>
+        <switch>{str(enabled).lower()}</switch>
     </motion>
 </config>"""
         
-        # Log the XML being sent
-        _LOGGER.debug("Sending SetMotionConfig XML: %s", xml_data)
-        
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
-        response = await self._request(endpoint, method="POST", data=xml_data)
-        
-        # Verify the change took effect
-        new_config = await self.get_motion_config(channel_id)
-        new_switch = new_config.get("switch", {}).get("#text", "false")
-        
-        if new_switch != switch:
-            _LOGGER.error("Failed to update motion detection. Expected %s, got %s", 
-                         switch, new_switch)
-            return False
-        
-        _LOGGER.info("Successfully %s motion detection for channel %s", 
-                    "enabled" if enabled else "disabled", channel_id)
+        await self._request(endpoint, method="POST", data=xml_data)
         return True
 
-    def _build_xml_items(self, items: list) -> str:
-        """Build XML item elements from list.
-        
-        Args:
-            items: List of item values
-            
-        Returns:
-            XML string with item elements
-        """
-        xml_items = []
-        for item in items:
-            # Handle both dict format (from xmltodict) and string format
-            if isinstance(item, dict):
-                value = item.get("#text", "")
-            else:
-                value = str(item)
-            xml_items.append(f'<item><![CDATA[{value}]]></item>')
-        
-        # Ensure we have exactly 9 items (as per the config)
-        while len(xml_items) < 9:
-            xml_items.append('<item><![CDATA[1111111111111111]]></item>')
-        
-        return '\n            '.join(xml_items)
-
-    async def get_alarm_status(self, channel_id: int = 1) -> dict[str, Any]:
+    async def get_alarm_status(self) -> dict[str, Any]:
         """Get current alarm status.
         
-        Args:
-            channel_id: Channel ID (default: 1)
-            
         Returns:
             Alarm status dict with motion, sensor, and other alarms
         """
-        endpoint = f"GetAlarmStatus/{channel_id}" if channel_id > 1 else "GetAlarmStatus"
-        response = await self._request(endpoint)
+        response = await self._request("GetAlarmStatus")
         config = response.get("config", {})
-        return config.get("alarmStatusInfo", config)
+        return config.get("alarmStatusInfo", {})
 
     async def close(self) -> None:
         """Close the HTTP client."""
@@ -367,8 +259,7 @@ class ProvisionClient:
             _LOGGER.debug("Request: %s %s", method, url)
             
             if method == "POST":
-                headers = {"Content-Type": "text/xml; charset=UTF-8"}
-                response = await client.post(url, content=data, headers=headers)
+                response = await client.post(url, content=data)
             else:
                 response = await client.get(url)
 
@@ -377,9 +268,6 @@ class ProvisionClient:
                 endpoint,
                 response.status_code,
             )
-            
-            # Log response text for debugging
-            _LOGGER.debug("Response text: %s", response.text[:500] if response.text else "Empty")
 
             # Handle HTTP status codes
             if response.status_code == HTTP_UNAUTHORIZED:
