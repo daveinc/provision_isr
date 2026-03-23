@@ -10,7 +10,7 @@ integration expects:
 """
 
 # Re‑export the main client class (correct module name)
-from .provision_client import ProvisionClient  # noqa: F401
+from .provision_api import ProvisionClient  # noqa: F401
 
 # Re‑export the model types (used by camera, switch, binary_sensor, etc.)
 from .models import (  # noqa: F401
