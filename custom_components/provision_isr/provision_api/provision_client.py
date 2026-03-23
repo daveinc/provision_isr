@@ -29,12 +29,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------
-# Helper – build a *full* <config> XML that mirrors the device's reply
-# to GET /GetMotionConfig, flipping only the <switch> value.
+# Helper – build a full <config> XML that matches the response from
+#   GET /GetMotionConfig.
 # ----------------------------------------------------------------------
 def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
     """Return the full <config> XML block for SetMotionConfig."""
-    # Deep‑copy so we don't mutate the original dict
     motion_copy: dict[str, Any] = copy.deepcopy(motion)
 
     # Flip the switch value
@@ -44,7 +43,7 @@ def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
         else:
             motion_copy["switch"] = {"#text": "true" if enable else "false"}
 
-    # Re‑create the <config> root with same version/namespace
+    # Re‑create the <config> root with the same version/namespace
     config_root = {
         "config": {
             "@version": "1.7",
@@ -53,13 +52,9 @@ def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
         }
     }
 
-    # Convert dict to XML; no header from xmltodict
-    xml_body = xmltodict.unparse(config_root, full_document=False)
-
-    # Prepend a single, correct XML header – the device expects it
-    xml_body = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
-
-    return xml_body
+    # xmltodict 3.x: use full_document=True, then prepend declaration
+    xml_body = xmltodict.unparse(config_root, full_document=True)
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
 
 
 class ProvisionClient:
@@ -118,7 +113,7 @@ class ProvisionClient:
         return self._client
 
     # ------------------------------------------------------------------
-    # Device‑info helpers
+    # Device info helpers
     # ------------------------------------------------------------------
     async def get_device_info(self) -> DeviceInfo:
         response = await self._request("GetDeviceInfo")
@@ -161,7 +156,7 @@ class ProvisionClient:
             raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
     # ------------------------------------------------------------------
-    # Motion‑config helpers
+    # Motion config helpers
     # ------------------------------------------------------------------
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
         """Return the motion configuration dict (just the <motion> node)."""
@@ -172,15 +167,15 @@ class ProvisionClient:
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
 
-        Returns True if the camera accepted the command.
+        Returns True if sensor state changed successfully.
         """
-        # Grab current configuration
+        # Grab current config
         motion_cfg = await self.get_motion_config(channel_id)
 
-        # Build XML payload
+        # Build the XML payload
         xml_payload = _build_motion_xml(self, motion_cfg, enabled)
 
-        # DEBUG – show exact XML sent
+        # DEBUG
         _LOGGER.debug("Sending SetMotionConfig XML: %s", xml_payload)
 
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
@@ -192,7 +187,6 @@ class ProvisionClient:
         return new_switch == ("true" if enabled else "false")
 
     async def get_alarm_status(self) -> dict[str, Any]:
-        """Get current alarm status."""
         response = await self._request("GetAlarmStatus")
         return response.get("config", {}).get("alarmStatusInfo", {})
 
@@ -202,7 +196,7 @@ class ProvisionClient:
     async def _request(
         self,
         endpoint: str,
-        method: str = "GET",
+        method: str = "GET",          # <-- default changed to GET
         data: str | None = None,
     ) -> dict[str, Any]:
         """Make an authenticated request to the device."""
@@ -264,7 +258,7 @@ class ProvisionClient:
         error_map = {
             "1": InvalidRequestError("Invalid request URL or parameters"),
             "2": InvalidXMLFormatError("Invalid XML format"),
-            "3": InvalidXMLContentError("Invalid XML content or out-of-range parameters"),
+            "3": InvalidXMLContentError("Invalid XML content or out‑of-range parameters"),
             "4": PermissionDeniedError("Permission denied"),
             "5": ProvisionError("Network port number error"),
         }
