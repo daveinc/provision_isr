@@ -1,19 +1,20 @@
 """Top‑level package for the Provision ISR API client library.
 
-This module re‑exports the public API that the Home Assistant
-integration expects:
+This file re‑exports everything that the Home Assistant
+integration keeps importing in a dotted‑name style:
 
-* The main client class – ``ProvisionClient``.
-* All data‑model classes (`ChannelList`, `DeviceInfo`, etc.).
-* The full exception hierarchy – including the renamed
-  ``ProvisionConnectionError``.
+   from .provision_api import ProvisionClient
+   from .provision_api import ChannelList, DeviceInfo, …
+
+No import of ``.provision_api`` (itself) is performed here,
+which avoids the circular import that caused the error you saw.
 """
 
-# Re‑export the main client class (correct module name)
-from .provision_api import ProvisionClient  # noqa: F401
+# --------  Client  ---------------------------------------------
+from .provision_client import ProvisionClient  # noqa: F401
 
-# Re‑export the model types (used by camera, switch, binary_sensor, etc.)
-from .models import (  # noqa: F401
+# --------  Models  ---------------------------------------------
+from .models import (
     ChannelList,
     DeviceInfo,
     DiskInfo,
@@ -21,8 +22,8 @@ from .models import (  # noqa: F401
     StreamInfo,
 )
 
-# Re‑export the exception hierarchy
-from .exceptions import (  # noqa: F401
+# --------  Exceptions  ---------------------------------------------
+from .exceptions import (
     ProvisionError,
     ProvisionConnectionError,
     AuthenticationError,
@@ -32,6 +33,7 @@ from .exceptions import (  # noqa: F401
     PermissionDeniedError,
 )
 
+# --------  Public API  ---------------------------------------------
 __all__ = [
     "ProvisionClient",
     "ChannelList",
