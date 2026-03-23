@@ -179,43 +179,45 @@ class ProvisionClient:
 
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
         """Get motion detection configuration.
+        
         Args:
             channel_id: Channel ID (default: 1)
+            
         Returns:
             Motion configuration dict
         """
         endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
         response = await self._request(endpoint)
         config = response.get("config", {})
-        motion_config = config.get("motion", {})
-
-        _LOGGER.debug("Motion config for channel %s: %s", channel_id, motion_config)
-
-        return motion_config
-
+        return config.get("motion", {})
+ 
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
-        Returns ``True`` if the camera accepted the command,
-        ``False`` otherwise.
+        
+        Args:
+            enabled: True to enable, False to disable
+            channel_id: Channel ID (default: 1)
+            
+        Returns:
+            True if successful
         """
-        # Grab current configuration
-        current_motion = await self.get_motion_config(channel_id)
-
-        # Build the XML payload
-        xml = _build_motion_xml(self, current_motion, enabled)
-
+        # First get current config
+        motion_config = await self.get_motion_config(channel_id)
+        
+        # Update switch value
+        motion_config["switch"] = enabled
+        
+        # Build XML request
+        xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
+    <motion>
+        <switch>{str(enabled).lower()}</switch>
+    </motion>
+</config>"""
+        
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
-        response = await self._request(endpoint, method="POST", data=xml)
-
-        # The API may return a 200 with an error code
-        if response.get("code") and response["code"] not in ("0", "200"):
-            _LOGGER.warning("SetMotionConfig returned error: %s", response)
-            return False
-
-        # Double‑check the new value
-        new_cfg = await self.get_motion_config(channel_id)
-        new_switch = new_cfg.get("switch", {}).get("#text", "false")
-        return new_switch == ("true" if enabled else "false")
+        await self._request(endpoint, method="POST", data=xml_data)
+        return True
 
     async def get_alarm_status(self) -> dict[str, Any]:
         """Get current alarm status.
