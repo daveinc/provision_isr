@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -29,12 +30,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------
-# Helper – build a full <config> XML that matches the response from
-#   GET /GetMotionConfig.
+# Helper – build a *full* <config> XML that mirrors the device’s reply
+# to GET /GetMotionConfig, flipping only the <switch> value.
 # ----------------------------------------------------------------------
 def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
     """Return the full <config> XML block for SetMotionConfig."""
-    # Deep‑copy so that we don’t mutate the original dict
+    # Deep‑copy the motion dict so we don't alter the original
     motion_copy: dict[str, Any] = copy.deepcopy(motion)
 
     # Flip the switch value
@@ -44,7 +45,7 @@ def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
         else:
             motion_copy["switch"] = {"#text": "true" if enable else "false"}
 
-    # Re‑create the top‑level <config> element with same version & namespace
+    # Re‑create the <config> root with same version/namespace
     config_root = {
         "config": {
             "@version": "1.7",
@@ -53,11 +54,32 @@ def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
         }
     }
 
-    # Build the XML string – no duplicate header
+    # Convert dict to XML
     xml_body = xmltodict.unparse(config_root, full_document=False)
 
-    # Prepend a single, correct XML header
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
+    # Prepend a single XML header – the device expects it
+    xml_body = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
+
+    # 1️⃣  Replace self‑closing <itemType> tags with XML‐style self close
+    xml_body = re.sub(r'<itemType([^>]*)></itemType>', r'<itemType\1/>', xml_body)
+
+    # 2️⃣  Wrap <item> contents in CDATA (unless already wrapped)
+    def wrap_cdata(match):
+        opening, content, closing = match.groups()
+        if content.lstrip().startswith("<![CDATA["):
+            return match.group(0)
+        return f"{opening}<![CDATA[{content}]]>{closing}"
+    xml_body = re.sub(r'(<item>)([^<]*)(</item>)', wrap_cdata, xml_body)
+
+    # 3️⃣  Insert empty CDATA for tags that expect it but have no content
+    #      (pushContent, subject, content inside mail)
+    xml_body = re.sub(
+        r'(<(pushContent|subject|content)[^>]*>)(</\2>)',
+        r'\1<![CDATA[]]>\2',
+        xml_body,
+    )
+
+    return xml_body
 
 
 class ProvisionClient:
@@ -116,7 +138,7 @@ class ProvisionClient:
         return self._client
 
     # ------------------------------------------------------------------
-    # Device info helpers
+    # Device‑info helpers
     # ------------------------------------------------------------------
     async def get_device_info(self) -> DeviceInfo:
         response = await self._request("GetDeviceInfo")
@@ -159,7 +181,7 @@ class ProvisionClient:
             raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
     # ------------------------------------------------------------------
-    # Motion config helpers
+    # Motion‑config helpers
     # ------------------------------------------------------------------
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
         """Return the motion configuration dict (just the <motion> node)."""
@@ -172,13 +194,13 @@ class ProvisionClient:
 
         Returns True if the camera accepted the command.
         """
-        # Grab current config
+        # Get the current motion configuration
         motion_cfg = await self.get_motion_config(channel_id)
 
         # Build the XML payload
         xml_payload = _build_motion_xml(self, motion_cfg, enabled)
 
-        # DEBUG: show the exact XML being sent
+        # DEBUG – show the exact XML being sent
         _LOGGER.debug("Sending SetMotionConfig XML: %s", xml_payload)
 
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
@@ -190,6 +212,7 @@ class ProvisionClient:
         return new_switch == ("true" if enabled else "false")
 
     async def get_alarm_status(self) -> dict[str, Any]:
+        """Get current alarm status."""
         response = await self._request("GetAlarmStatus")
         return response.get("config", {}).get("alarmStatusInfo", {})
 
@@ -199,7 +222,7 @@ class ProvisionClient:
     async def _request(
         self,
         endpoint: str,
-        method: str = "GET",          # default is now GET
+        method: str = "GET",
         data: str | None = None,
     ) -> dict[str, Any]:
         """Make an authenticated request to the device."""
@@ -220,6 +243,7 @@ class ProvisionClient:
                 endpoint,
                 response.status_code,
             )
+            # Log only the first 500 chars – the full XML is large
             _LOGGER.debug(
                 "Response text: %s",
                 response.text[:500] if response.text else "Empty",
