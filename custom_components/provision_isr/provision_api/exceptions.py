@@ -1,11 +1,11 @@
 """Exceptions for Provision ISR API client."""
-
+from __future__ import annotations
 
 class ProvisionError(Exception):
     """Base exception for Provision ISR API errors."""
 
 
-class ConnectionError(ProvisionError):
+class ProvisionConnectionError(ProvisionError):
     """Connection to device failed."""
 
 
@@ -22,7 +22,7 @@ class InvalidXMLFormatError(ProvisionError):
 
 
 class InvalidXMLContentError(ProvisionError):
-    """Invalid XML content or out-of-range parameters (Error Code 3)."""
+    """Invalid XML content or out‑of‑range parameters (Error Code 3)."""
 
 
 class PermissionDeniedError(ProvisionError):
