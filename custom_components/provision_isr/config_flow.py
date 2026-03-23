@@ -11,7 +11,12 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_USERNAME,
+)
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
@@ -37,6 +42,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
+# -------------   <---  NEW: fixed base‑class header ------------------
 class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Provision ISR."""
 
@@ -47,7 +53,7 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_devices: list[dict[str, Any]] = []
         self._manual_entry = False
 
-    async def async_step_user(
+    async def async_step_user(  # pragma: no cover
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step - discovery."""
@@ -56,34 +62,30 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
             if user_input.get("device") == "manual":
                 self._manual_entry = True
                 return await self.async_step_manual()
-            
-            # User selected discovered device
+
+            # User selected a discovered device
             selected = user_input["device"]
             for device in self._discovered_devices:
                 if device["name"] == selected:
                     return await self.async_step_credentials(device)
-        
+
         # Discover devices on network
         _LOGGER.info("Starting device discovery...")
         self._discovered_devices = await discover_devices(self.hass)
-        
+
         # Build options list
-        device_options = {}
-        for device in self._discovered_devices:
-            device_options[device["name"]] = device["name"]
-        
+        device_options = {d["name"]: d["name"] for d in self._discovered_devices}
+
         # Always add manual entry option
         device_options["manual"] = "Manual Entry"
-        
+
         if len(self._discovered_devices) > 0:
             _LOGGER.info("Found %d device(s)", len(self._discovered_devices))
-        
+
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
-                {
-                    vol.Required("device"): vol.In(device_options),
-                }
+                {vol.Required("device"): vol.In(device_options)}
             ),
             description_placeholders={
                 "discovered_count": str(len(self._discovered_devices))
@@ -95,28 +97,28 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle credentials entry for discovered device."""
         errors = {}
-        
+
         if user_input is not None:
             # Validate connection
             user_input[CONF_HOST] = device_info[CONF_HOST]
             user_input[CONF_PORT] = device_info[CONF_PORT]
-            
+
+            # <--- NEW: close the client in finally -----------------
             result = await self._test_connection(user_input)
             if result["success"]:
                 # Store MAC address for IP change detection
                 user_input[CONF_MAC_ADDRESS] = result["mac"]
-                
+
                 # Check if already configured
                 await self.async_set_unique_id(result["mac"])
                 self._abort_if_unique_id_configured()
-                
+
                 return self.async_create_entry(
-                    title=result["model"],
-                    data=user_input,
+                    title=result["model"], data=user_input
                 )
-            
+
             errors["base"] = result["error"]
-        
+
         return self.async_show_form(
             step_id="credentials",
             data_schema=vol.Schema(
@@ -138,34 +140,30 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle manual device entry."""
         errors = {}
-        
+
         if user_input is not None:
-            # Validate connection
             result = await self._test_connection(user_input)
             if result["success"]:
-                # Store MAC address
                 user_input[CONF_MAC_ADDRESS] = result["mac"]
-                
-                # Check if already configured
+
                 await self.async_set_unique_id(result["mac"])
                 self._abort_if_unique_id_configured()
-                
+
                 return self.async_create_entry(
-                    title=result["model"],
-                    data=user_input,
+                    title=result["model"], data=user_input
                 )
-            
+
             errors["base"] = result["error"]
-        
+
         return self.async_show_form(
-            step_id="manual",
-            data_schema=STEP_USER_DATA_SCHEMA,
-            errors=errors,
+            step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
 
-    async def _test_connection(self, config: dict[str, Any]) -> dict[str, Any]:
+    async def _test_connection(
+        self, config: dict[str, Any]
+    ) -> dict[str, Any]:
         """Test connection to device.
-        
+
         Returns:
             Dictionary with success status, error message, MAC, and model
         """
@@ -176,19 +174,21 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
                 username=config[CONF_USERNAME],
                 password=config[CONF_PASSWORD],
             )
-            
-            # Test connection and get device info
-            await client.connect()
-            device_info = await client.get_device_info()
-            await client.close()
-            
+
+            # <--- NEW: ensure the client is closed on all outcomes --------
+            try:
+                await client.connect()
+                device_info = await client.get_device_info()
+            finally:
+                await client.close()
+
             return {
                 "success": True,
                 "mac": device_info.mac,
                 "model": f"{device_info.brand} {device_info.model}",
                 "error": None,
             }
-            
+
         except AuthenticationError:
             return {
                 "success": False,
@@ -216,7 +216,7 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry,
-    ) -> ProvisionISROptionsFlow:
+    ) -> "ProvisionISROptionsFlow":
         """Get the options flow for this handler."""
         return ProvisionISROptionsFlow()
 
@@ -237,9 +237,7 @@ class ProvisionISROptionsFlow(OptionsFlow):
                 {
                     vol.Optional(
                         CONF_AUTO_DETECT_IP,
-                        default=self.config_entry.options.get(
-                            CONF_AUTO_DETECT_IP, False
-                        ),
+                        default=self.config_entry.options.get(CONF_AUTO_DETECT_IP, False),
                     ): cv.boolean,
                 }
             ),
