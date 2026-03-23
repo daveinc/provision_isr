@@ -1,19 +1,36 @@
-"""Top‑level package for the Provision ISR API client library."""
+"""Top‑level package for the Provision ISR API client library.
 
-# Re‑export the main client class
-from .client import ProvisionClient  # noqa: F401
+This module re‑exports the public API that the Home Assistant
+integration expects:
 
-# Re‑export the model types (so other modules can use them without a submodule import)
-from .models import (
+* The main client class – `ProvisionClient`.
+* All data‑model classes (`ChannelList`, `DeviceInfo`, etc.).
+* The entire exception hierarchy – including the renamed
+  ``ProvisionConnectionError``.
+"""
+
+# Re‑export the main client class (correct module name)
+from .provision_client import ProvisionClient  # noqa: F401
+
+# Re‑export the model types (used by camera, switch, binary_sensor, etc.)
+from .models import (  # noqa: F401
     ChannelList,
     DeviceInfo,
     DiskInfo,
     StreamCaps,
     StreamInfo,
-)  # noqa: F401
+)
 
 # Re‑export the exception hierarchy
-from .exceptions import *  # noqa: F401,F403
+from .exceptions import (
+    ProvisionError,
+    ProvisionConnectionError,
+    AuthenticationError,
+    InvalidRequestError,
+    InvalidXMLFormatError,
+    InvalidXMLContentError,
+    PermissionDeniedError,
+)  # noqa: F401
 
 __all__ = [
     "ProvisionClient",
