@@ -5,8 +5,12 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
 DOMAIN = "provision_isr"
 DEFAULT_TIMEOUT = 10
-DEFAULT_PORT = 80
+DEFAULT_PORT = 90
 DEFAULT_USERNAME = "admin"  # Add this line
+
+# Discovery
+COMMON_PORTS = [80, 90, 51986]  # Common Provision ISR ports
+DISCOVERY_TIMEOUT = 10  # seconds
 
 # HTTP Status Codes
 HTTP_OK = 200
