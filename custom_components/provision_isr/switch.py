@@ -1,338 +1,162 @@
-"""Provision ISR API Client."""
+"""Switch platform for Provision ISR integration."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
-import httpx
-import xmltodict
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    DEFAULT_TIMEOUT,
-    HTTP_OK,
-    HTTP_UNAUTHORIZED,
-    HTTP_BAD_REQUEST,
-)
-from .exceptions import (
-    AuthenticationError,
-    ConnectionError as ProvisionConnectionError,
-    InvalidRequestError,
-    InvalidXMLFormatError,
-    InvalidXMLContentError,
-    PermissionDeniedError,
-    ProvisionError,
-)
-from .models import DeviceInfo, ChannelList, DiskInfo, StreamCaps
+from .const import DOMAIN
+from .provision_api import ProvisionClient
+from .provision_api.models import DeviceInfo as ProvisionDeviceInfo
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class ProvisionClient:
-    """Client for Provision ISR API."""
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Provision ISR switches from a config entry."""
+    client: ProvisionClient = hass.data[DOMAIN][entry.entry_id]["client"]
+    device_info: ProvisionDeviceInfo = hass.data[DOMAIN][entry.entry_id]["device_info"]
+
+    switches = []
+
+    # Check if device supports motion detection
+    if device_info.support_motion_sens:
+        if device_info.is_nvr():
+            # Get channel list
+            try:
+                channel_list = await client.get_channel_list()
+                for channel in channel_list.channels:
+                    if channel.is_online:
+                        switches.append(
+                            ProvisionMotionSwitch(
+                                client=client,
+                                device_info=device_info,
+                                entry=entry,
+                                channel_id=int(channel.channel_id),
+                            )
+                        )
+            except Exception as err:
+                _LOGGER.error("Failed to get channel list: %s", err)
+        else:
+            # Single camera
+            switches.append(
+                ProvisionMotionSwitch(
+                    client=client,
+                    device_info=device_info,
+                    entry=entry,
+                    channel_id=1,
+                )
+            )
+
+    if switches:
+        async_add_entities(switches)
+        _LOGGER.info("Added %d motion switch(es)", len(switches))
+
+
+class ProvisionMotionSwitch(SwitchEntity):
+    """Representation of a Provision ISR motion detection switch."""
+
+    _attr_icon = "mdi:motion-sensor"
 
     def __init__(
         self,
-        host: str,
-        port: int,
-        username: str,
-        password: str,
-        timeout: int = DEFAULT_TIMEOUT,
+        client: ProvisionClient,
+        device_info: ProvisionDeviceInfo,
+        entry: ConfigEntry,
+        channel_id: int,
     ) -> None:
-        """Initialize the Provision client.
-        
-        Args:
-            host: IP address or hostname of the device
-            port: HTTP port (default: 80)
-            username: Username for authentication
-            password: Password for authentication
-            timeout: Request timeout in seconds
-        """
-        self._host = host
-        self._port = port
-        self._base_url = f"http://{host}:{port}"
-        self._auth = httpx.BasicAuth(username, password)
-        self._timeout = timeout
-        self._client: httpx.AsyncClient | None = None
+        """Initialize the motion switch."""
+        self._client = client
+        self._device_info = device_info
+        self._entry = entry
+        self._channel_id = channel_id
 
-    async def connect(self) -> bool:
-        """Test connection and authentication.
-        
-        Returns:
-            True if connection successful
-            
-        Raises:
-            AuthenticationError: If authentication fails
-            ProvisionConnectionError: If connection fails
-        """
-        try:
-            # Test connection by getting device info
-            await self.get_device_info()
-            _LOGGER.info("Successfully connected to %s:%s", self._host, self._port)
-            return True
-        except AuthenticationError:
-            _LOGGER.error("Authentication failed for %s:%s", self._host, self._port)
-            raise
-        except Exception as err:
-            _LOGGER.error("Connection failed to %s:%s: %s", self._host, self._port, err)
-            raise ProvisionConnectionError(f"Failed to connect: {err}") from err
+        # Generate unique ID
+        self._attr_unique_id = f"{device_info.mac}_ch{channel_id}_motion_switch"
 
-    async def get_device_info(self) -> DeviceInfo:
-        """Get device information.
-        
-        Returns:
-            DeviceInfo object with device details
-        """
-        response = await self._request("GetDeviceInfo")
-        
-        # Navigate to deviceInfo in the XML response
-        config = response.get("config", {})
-        device_data = config.get("deviceInfo", {})
-        
-        return DeviceInfo.from_dict(device_data)
+        # Set name
+        if device_info.is_nvr():
+            self._attr_name = f"{device_info.model} Channel {channel_id} Motion Detection"
+        else:
+            self._attr_name = f"{device_info.model} Motion Detection"
 
-    async def get_channel_list(self) -> ChannelList:
-        """Get channel list (NVR only).
-        
-        Returns:
-            ChannelList object with channel information
-        """
-        response = await self._request("GetChannelList")
-        config = response.get("config", {})
-        return ChannelList.from_dict(config)
-
-    async def get_disk_info(self) -> DiskInfo:
-        """Get disk information.
-        
-        Returns:
-            DiskInfo object with disk details
-        """
-        response = await self._request("GetDiskInfo")
-        config = response.get("config", {})
-        return DiskInfo.from_dict(config)
-
-    async def get_stream_caps(self, channel_id: int = 1) -> StreamCaps:
-        """Get stream capabilities for a channel.
-        
-        Args:
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            StreamCaps object with stream information
-        """
-        endpoint = f"GetStreamCaps/{channel_id}" if channel_id > 1 else "GetStreamCaps"
-        response = await self._request(endpoint)
-        config = response.get("config", {})
-        return StreamCaps.from_dict(config)
-
-    async def get_snapshot(self, channel_id: int = 1) -> bytes:
-        """Get snapshot image for a channel.
-        
-        Args:
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            JPEG image bytes
-        """
-        endpoint = f"GetSnapshot/{channel_id}" if channel_id > 1 else "GetSnapshot"
-        url = f"{self._base_url}/{endpoint}"
-        client = await self._get_client()
-        
-        try:
-            response = await client.get(url)
-            
-            if response.status_code == HTTP_UNAUTHORIZED:
-                raise AuthenticationError("Invalid username or password")
-            
-            if response.status_code != HTTP_OK:
-                raise ProvisionConnectionError(f"Snapshot failed: HTTP {response.status_code}")
-            
-            return response.content
-            
-        except httpx.TimeoutException as err:
-            raise ProvisionConnectionError(f"Snapshot timeout: {err}") from err
-        except httpx.RequestError as err:
-            raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
-
-    async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
-        """Get motion detection configuration.
-        
-        Args:
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            Motion configuration dict
-        """
-        endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
-        response = await self._request(endpoint)
-        config = response.get("config", {})
-        return config.get("motion", {})
-
-    async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
-        """Enable or disable motion detection.
-        
-        Args:
-            enabled: True to enable, False to disable
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            True if successful
-        """
-        # First get current config
-        motion_config = await self.get_motion_config(channel_id)
-        
-        # Update switch value
-        motion_config["switch"] = enabled
-        
-        # Build XML request
-        xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
-<config version="1.0" xmlns="http://www.ipc.com/ver10">
-    <motion>
-        <switch>{str(enabled).lower()}</switch>
-    </motion>
-</config>"""
-        
-        endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
-        await self._request(endpoint, method="POST", data=xml_data)
-        return True
-
-    async def get_alarm_status(self) -> dict[str, Any]:
-        """Get current alarm status.
-        
-        Returns:
-            Alarm status dict with motion, sensor, and other alarms
-        """
-        response = await self._request("GetAlarmStatus")
-        config = response.get("config", {})
-        return config.get("alarmStatusInfo", {})
-
-    async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-            _LOGGER.debug("Client connection closed")
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client.
-        
-        Returns:
-            Configured httpx.AsyncClient
-        """
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                auth=self._auth,
-                timeout=self._timeout,
-                follow_redirects=True,
-                headers={
-                    "Content-Type": "application/xml; charset=UTF-8",
-                    "Connection": "Keep-Alive",
-                },
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        if self._device_info.is_nvr():
+            # For NVR, link to channel device
+            return DeviceInfo(
+                identifiers={(DOMAIN, f"{self._device_info.mac}_ch{self._channel_id}")},
+                name=f"{self._device_info.model} Channel {self._channel_id}",
+                manufacturer=self._device_info.brand,
+                model=self._device_info.model,
+                sw_version=self._device_info.software_version,
+                via_device=(DOMAIN, self._device_info.mac),
             )
-        return self._client
+        else:
+            # For IPC, use main device
+            return DeviceInfo(
+                identifiers={(DOMAIN, self._device_info.mac)},
+                name=self._device_info.model,
+                manufacturer=self._device_info.brand,
+                model=self._device_info.model,
+                sw_version=self._device_info.software_version,
+                hw_version=self._device_info.hardware_version,
+                serial_number=self._device_info.serial_number,
+            )
 
-    async def _request(
-        self,
-        endpoint: str,
-        method: str = "POST",
-        data: str | None = None,
-    ) -> dict[str, Any]:
-        """Make authenticated request to the device.
-        
-        Args:
-            endpoint: API endpoint (e.g., "GetDeviceInfo")
-            method: HTTP method (POST or GET)
-            data: XML data for POST requests
-            
-        Returns:
-            Parsed XML response as dictionary
-            
-        Raises:
-            AuthenticationError: On 401 response
-            ProvisionError: On API errors
-            ProvisionConnectionError: On connection failures
-        """
-        url = f"{self._base_url}/{endpoint}"
-        client = await self._get_client()
-
+    async def async_added_to_hass(self) -> None:
+        """Run when entity is added to hass."""
+        # Get current motion detection state
         try:
-            _LOGGER.debug("Request: %s %s", method, url)
-            
-            if method == "POST":
-                response = await client.post(url, content=data)
-            else:
-                response = await client.get(url)
+            motion_config = await self._client.get_motion_config(self._channel_id)
+            switch_value = motion_config.get("switch", "false")
+
+            # Handle both boolean and string values
+            self._attr_is_on = (
+                (switch_value is True)
+                or (isinstance(switch_value, str) and switch_value.lower() == "true")
+            )
 
             _LOGGER.debug(
-                "Response: %s (status: %s)",
-                endpoint,
-                response.status_code,
+                "Motion detection for %s is %s",
+                self._attr_unique_id,
+                "enabled" if self._attr_is_on else "disabled",
             )
-
-            # Handle HTTP status codes
-            if response.status_code == HTTP_UNAUTHORIZED:
-                raise AuthenticationError("Invalid username or password")
-
-            if response.status_code == HTTP_BAD_REQUEST:
-                # Parse error from response
-                error_data = self._parse_xml(response.text)
-                error_code = error_data.get("config", {}).get("@errorCode")
-                self._raise_api_error(error_code)
-
-            if response.status_code != HTTP_OK:
-                raise ProvisionConnectionError(
-                    f"HTTP {response.status_code}: {response.text}"
-                )
-
-            # Parse successful response
-            return self._parse_xml(response.text)
-
-        except httpx.TimeoutException as err:
-            raise ProvisionConnectionError(f"Request timeout: {err}") from err
-        except httpx.RequestError as err:
-            raise ProvisionConnectionError(f"Request failed: {err}") from err
-
-    def _parse_xml(self, xml_text: str) -> dict[str, Any]:
-        """Parse XML response to dictionary.
-        
-        Args:
-            xml_text: XML string
-            
-        Returns:
-            Parsed XML as dictionary
-        """
-        try:
-            # xmltodict preserves attributes with @ prefix
-            return xmltodict.parse(xml_text)
         except Exception as err:
-            _LOGGER.error("Failed to parse XML: %s", err)
-            raise InvalidXMLFormatError(f"Invalid XML format: {err}") from err
+            _LOGGER.error("Failed to get motion config: %s", err)
 
-    def _raise_api_error(self, error_code: str | None) -> None:
-        """Raise appropriate exception based on error code.
-        
-        Args:
-            error_code: Error code from API response
-            
-        Raises:
-            Appropriate ProvisionError subclass
-        """
-        error_map = {
-            "1": InvalidRequestError("Invalid request URL or parameters"),
-            "2": InvalidXMLFormatError("Invalid XML format"),
-            "3": InvalidXMLContentError("Invalid XML content or out-of-range parameters"),
-            "4": PermissionDeniedError("Permission denied"),
-            "5": ProvisionError("Network port number error"),
-        }
-        
-        exception = error_map.get(error_code, ProvisionError(f"Unknown error code: {error_code}"))
-        raise exception
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable motion detection."""
+        try:
+            changed = await self._client.set_motion_enabled(True, self._channel_id)
+            if changed:
+                self._attr_is_on = True
+            else:
+                _LOGGER.error("Camera rejected enable motion request")
+        except Exception as err:
+            _LOGGER.exception("Error enabling motion detection: %s", err)
+        finally:
+            self.async_write_ha_state()
 
-    async def __aenter__(self) -> ProvisionClient:
-        """Async context manager entry."""
-        await self.connect()
-        return self
-
-    async def __aexit__(self, *args) -> None:
-        """Async context manager exit."""
-        await self.close()
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable motion detection."""
+        try:
+            changed = await self._client.set_motion_enabled(False, self._channel_id)
+            if changed:
+                self._attr_is_on = False
+            else:
+                _LOGGER.error("Camera rejected disable motion request")
+        except Exception as err:
+            _LOGGER.exception("Error disabling motion detection: %s", err)
+        finally:
+            self.async_write_ha_state()
