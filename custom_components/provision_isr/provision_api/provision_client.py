@@ -9,27 +9,77 @@ import httpx
 import xmltodict
 
 from .const import (
-DEFAULT_TIMEOUT,
-HTTP_OK,
-HTTP_UNAUTHORIZED,
-HTTP_BAD_REQUEST,
+    DEFAULT_TIMEOUT,
+    HTTP_OK,
+    HTTP_UNAUTHORIZED,
+    HTTP_BAD_REQUEST,
 )
 from .exceptions import (
-AuthenticationError,
-ProvisionConnectionError,
-InvalidRequestError,
-InvalidXMLFormatError,
-InvalidXMLContentError,
-PermissionDeniedError,
-ProvisionError,
+    AuthenticationError,
+    ProvisionConnectionError,
+    InvalidRequestError,
+    InvalidXMLFormatError,
+    InvalidXMLContentError,
+    PermissionDeniedError,
+    ProvisionError,
 )
 from .models import DeviceInfo, ChannelList, DiskInfo, StreamCaps, StreamInfo
 
 _LOGGER = logging.getLogger(__name__)
 
 
+# ----------------------------------------------------------------------
+# Helper: Build a valid <motion> XML block
+# ----------------------------------------------------------------------
+def _build_motion_xml(
+    self, motion: dict[str, Any], enable: bool
+) -> str:
+    """
+    Return XML that keeps the current motion configuration unchanged
+    except for the 'switch' value.
+    """
+    # The camera’s response sometimes nests the motion dict inside a 'motion' key.
+    cfg = motion.get("motion", motion)
+
+    switch = "true" if enable else "false"
+    sensitivity = cfg.get("sensitivity", {}).get("#text", "6")
+    alarm_hold_time = cfg.get("alarmHoldTime", {}).get("#text", "3")
+
+    area_items = cfg.get("area", {}).get("item", [])
+    if not isinstance(area_items, list):
+        area_items = [area_items] if area_items else []
+
+    sens_items = cfg.get("sensitivities", {}).get("item", [])
+    if not isinstance(sens_items, list):
+        sens_items = [sens_items] if sens_items else []
+
+    def xml_items(items: list) -> str:
+        return "\n".join(
+            f"<item><![CDATA[{i.get('#text', '1111111111111111')}]]></item>"
+            for i in items
+        )
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
+    <motion>
+        <switch type="boolean">{switch}</switch>
+        <sensitivity type="int32" min="1" max="8">{sensitivity}</sensitivity>
+        <alarmHoldTime type="uint32">{alarm_hold_time}</alarmHoldTime>
+        <area type="list" count="{len(area_items)}">
+            <itemType type="string" minLen="16" maxLen="16"/>
+            {xml_items(area_items)}
+        </area>
+        <sensitivities type="list" count="{len(sens_items)}">
+            <itemType type="string" minLen="16" maxLen="16"/>
+            {xml_items(sens_items)}
+        </sensitivities>
+        <!-- Optional sections ignored because the camera accepts a minimal form -->
+    </motion>
+</config>"""
+
+
 class ProvisionClient:
-    """Client for Provision ISR API."""
+    """Client for Provision ISR device."""
 
     def __init__(
         self,
@@ -40,7 +90,6 @@ class ProvisionClient:
         timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
         """Initialize the Provision client.
-        
         Args:
             host: IP address or hostname of the device
             port: HTTP port (default: 80)
@@ -57,10 +106,8 @@ class ProvisionClient:
 
     async def connect(self) -> bool:
         """Test connection and authentication.
-        
         Returns:
             True if connection successful
-            
         Raises:
             AuthenticationError: If authentication fails
             ProvisionConnectionError: If connection fails
@@ -79,21 +126,16 @@ class ProvisionClient:
 
     async def get_device_info(self) -> DeviceInfo:
         """Get device information.
-        
         Returns:
             DeviceInfo object with device details
         """
         response = await self._request("GetDeviceInfo")
-        
-        # Navigate to deviceInfo in the XML response
         config = response.get("config", {})
         device_data = config.get("deviceInfo", {})
-        
         return DeviceInfo.from_dict(device_data)
 
     async def get_channel_list(self) -> ChannelList:
         """Get channel list (NVR only).
-        
         Returns:
             ChannelList object with channel information
         """
@@ -103,7 +145,6 @@ class ProvisionClient:
 
     async def get_disk_info(self) -> DiskInfo:
         """Get disk information.
-        
         Returns:
             DiskInfo object with disk details
         """
@@ -113,10 +154,8 @@ class ProvisionClient:
 
     async def get_stream_caps(self, channel_id: int = 1) -> StreamCaps:
         """Get stream capabilities for a channel.
-        
         Args:
             channel_id: Channel ID (default: 1)
-            
         Returns:
             StreamCaps object with stream information
         """
@@ -127,28 +166,26 @@ class ProvisionClient:
 
     async def get_snapshot(self, channel_id: int = 1) -> bytes:
         """Get snapshot image for a channel.
-        
         Args:
             channel_id: Channel ID (default: 1)
-            
         Returns:
             JPEG image bytes
         """
         endpoint = f"GetSnapshot/{channel_id}" if channel_id > 1 else "GetSnapshot"
         url = f"{self._base_url}/{endpoint}"
         client = await self._get_client()
-        
+
         try:
             response = await client.get(url)
-            
+
             if response.status_code == HTTP_UNAUTHORIZED:
                 raise AuthenticationError("Invalid username or password")
-            
+
             if response.status_code != HTTP_OK:
                 raise ProvisionConnectionError(f"Snapshot failed: HTTP {response.status_code}")
-            
+
             return response.content
-            
+
         except httpx.TimeoutException as err:
             raise ProvisionConnectionError(f"Snapshot timeout: {err}") from err
         except httpx.RequestError as err:
@@ -156,49 +193,47 @@ class ProvisionClient:
 
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
         """Get motion detection configuration.
-        
         Args:
             channel_id: Channel ID (default: 1)
-            
         Returns:
             Motion configuration dict
         """
         endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
         response = await self._request(endpoint)
         config = response.get("config", {})
-        return config.get("motion", {})
+        motion_config = config.get("motion", {})
+
+        # Log the full config for debugging
+        _LOGGER.debug("Motion config for channel %s: %s", channel_id, motion_config)
+
+        return motion_config
 
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
-        
-        Args:
-            enabled: True to enable, False to disable
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            True if successful
+        Returns ``True`` if the camera accepted the command,
+        ``False`` otherwise.
         """
-        # First get current config
-        motion_config = await self.get_motion_config(channel_id)
-        
-        # Update switch value
-        motion_config["switch"] = enabled
-        
-        # Build XML request
-        xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
-<config version="1.0" xmlns="http://www.ipc.com/ver10">
-    <motion>
-        <switch>{str(enabled).lower()}</switch>
-    </motion>
-</config>"""
-        
+        # Grab current configuration
+        current_motion = await self.get_motion_config(channel_id)
+
+        # Build XML with the new switch value
+        xml = _build_motion_xml(self, current_motion, enabled)
+
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
-        await self._request(endpoint, method="POST", data=xml_data)
-        return True
+        response = await self._request(endpoint, method="POST", data=xml)
+
+        # Provision API may return a 'code' field for errors
+        if response.get("code") and response["code"] not in ("0", "200"):
+            _LOGGER.warning("SetMotionConfig returned error: %s", response)
+            return False
+
+        # Double‑check new value
+        new_cfg = await self.get_motion_config(channel_id)
+        new_switch = new_cfg.get("motion", {}).get("switch", {}).get("#text", "false")
+        return new_switch == ("true" if enabled else "false")
 
     async def get_alarm_status(self) -> dict[str, Any]:
         """Get current alarm status.
-        
         Returns:
             Alarm status dict with motion, sensor, and other alarms
         """
@@ -215,7 +250,6 @@ class ProvisionClient:
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client.
-        
         Returns:
             Configured httpx.AsyncClient
         """
@@ -238,15 +272,12 @@ class ProvisionClient:
         data: str | None = None,
     ) -> dict[str, Any]:
         """Make authenticated request to the device.
-        
         Args:
             endpoint: API endpoint (e.g., "GetDeviceInfo")
             method: HTTP method (POST or GET)
             data: XML data for POST requests
-            
         Returns:
             Parsed XML response as dictionary
-            
         Raises:
             AuthenticationError: On 401 response
             ProvisionError: On API errors
@@ -257,9 +288,10 @@ class ProvisionClient:
 
         try:
             _LOGGER.debug("Request: %s %s", method, url)
-            
+
             if method == "POST":
-                response = await client.post(url, content=data)
+                headers = {"Content-Type": "text/xml; charset=UTF-8"}
+                response = await client.post(url, content=data, headers=headers)
             else:
                 response = await client.get(url)
 
@@ -268,6 +300,7 @@ class ProvisionClient:
                 endpoint,
                 response.status_code,
             )
+            _LOGGER.debug("Response text: %s", response.text[:500] if response.text else "Empty")
 
             # Handle HTTP status codes
             if response.status_code == HTTP_UNAUTHORIZED:
@@ -294,10 +327,8 @@ class ProvisionClient:
 
     def _parse_xml(self, xml_text: str) -> dict[str, Any]:
         """Parse XML response to dictionary.
-        
         Args:
             xml_text: XML string
-            
         Returns:
             Parsed XML as dictionary
         """
@@ -310,10 +341,8 @@ class ProvisionClient:
 
     def _raise_api_error(self, error_code: str | None) -> None:
         """Raise appropriate exception based on error code.
-        
         Args:
             error_code: Error code from API response
-            
         Raises:
             Appropriate ProvisionError subclass
         """
@@ -324,7 +353,7 @@ class ProvisionClient:
             "4": PermissionDeniedError("Permission denied"),
             "5": ProvisionError("Network port number error"),
         }
-        
+
         exception = error_map.get(error_code, ProvisionError(f"Unknown error code: {error_code}"))
         raise exception
 
