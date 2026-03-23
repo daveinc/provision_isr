@@ -29,28 +29,21 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------
-# Helper – build a *full* <config> XML that matches the response from
+# Helper – build a full <config> XML that matches the response from
 #   GET /GetMotionConfig.
-#
-# The function deep‑copies the dict that came from ``xmltodict.parse``.
-# It flips only the ``<switch>`` value and then turns the dict back into a
-# string with xmltodict.unparse.  Because the current xmltodict
-# 3.x does not support the ``xml_declaration`` keyword we add the
-# declaration manually afterwards.
 # ----------------------------------------------------------------------
 def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
     """Return the full <config> XML block for SetMotionConfig."""
-    # Make a full, independent copy of the motion config
     motion_copy: dict[str, Any] = copy.deepcopy(motion)
 
-    # Flip the switch
+    # Flip the switch value
     if "switch" in motion_copy:
         if isinstance(motion_copy["switch"], dict):
             motion_copy["switch"]["#text"] = "true" if enable else "false"
         else:
             motion_copy["switch"] = {"#text": "true" if enable else "false"}
 
-    # Build the full config dict that lives at the root
+    # Re‑create the <config> root with the same version/namespace
     config_root = {
         "config": {
             "@version": "1.7",
@@ -59,11 +52,11 @@ def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
         }
     }
 
-    # xmltodict 3.x: use full_document=True to add the top‑level
+    # xmltodict 3.x: use full_document=True, then prepend declaration
     xml_body = xmltodict.unparse(config_root, full_document=True)
-
-    # Prepend the XML declaration ourselves (the device expects it)
     return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
+
+
 class ProvisionClient:
     """Client for Provision ISR device."""
 
@@ -75,14 +68,6 @@ class ProvisionClient:
         password: str,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
-        """Initialize the Provision client.
-        Args:
-            host: IP address or hostname of the device
-            port: HTTP port (default: 80)
-            username: Username for authentication
-            password: Password for authentication
-            timeout: Request timeout in seconds
-        """
         self._host = host
         self._port = port
         self._base_url = f"http://{host}:{port}"
@@ -90,16 +75,12 @@ class ProvisionClient:
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
+    # ------------------------------------------------------------------
+    # Connection helpers
+    # ------------------------------------------------------------------
     async def connect(self) -> bool:
-        """Test connection and authentication.
-        Returns:
-            True if connection successful
-        Raises:
-            AuthenticationError: If authentication fails
-            ProvisionConnectionError: If connection fails
-        """
+        """Test connection and authentication."""
         try:
-            # Test connection by getting device info
             await self.get_device_info()
             _LOGGER.info("Successfully connected to %s:%s", self._host, self._port)
             return True
@@ -110,53 +91,50 @@ class ProvisionClient:
             _LOGGER.error("Connection failed to %s:%s: %s", self._host, self._port, err)
             raise ProvisionConnectionError(f"Failed to connect: {err}") from err
 
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+            _LOGGER.debug("Client connection closed")
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the httpx client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                auth=self._auth,
+                timeout=self._timeout,
+                follow_redirects=True,
+                headers={
+                    "Content-Type": "application/xml; charset=UTF-8",
+                    "Connection": "Keep-Alive",
+                },
+            )
+        return self._client
+
+    # ------------------------------------------------------------------
+    # Device info helpers
+    # ------------------------------------------------------------------
     async def get_device_info(self) -> DeviceInfo:
-        """Get device information.
-        Returns:
-            DeviceInfo object with device details
-        """
         response = await self._request("GetDeviceInfo")
         config = response.get("config", {})
         device_data = config.get("deviceInfo", {})
         return DeviceInfo.from_dict(device_data)
 
     async def get_channel_list(self) -> ChannelList:
-        """Get channel list (NVR only).
-        Returns:
-            ChannelList object with channel information
-        """
         response = await self._request("GetChannelList")
-        config = response.get("config", {})
-        return ChannelList.from_dict(config)
+        return ChannelList.from_dict(response.get("config", {}))
 
     async def get_disk_info(self) -> DiskInfo:
-        """Get disk information.
-        Returns:
-            DiskInfo object with disk details
-        """
         response = await self._request("GetDiskInfo")
-        config = response.get("config", {})
-        return DiskInfo.from_dict(config)
+        return DiskInfo.from_dict(response.get("config", {}))
 
     async def get_stream_caps(self, channel_id: int = 1) -> StreamCaps:
-        """Get stream capabilities for a channel.
-        Args:
-            channel_id: Channel ID (default: 1)
-        Returns:
-            StreamCaps object with stream information
-        """
         endpoint = f"GetStreamCaps/{channel_id}" if channel_id > 1 else "GetStreamCaps"
         response = await self._request(endpoint)
-        config = response.get("config", {})
-        return StreamCaps.from_dict(config)
+        return StreamCaps.from_dict(response.get("config", {}))
 
     async def get_snapshot(self, channel_id: int = 1) -> bytes:
-        """Get snapshot image for a channel.
-        Args:
-            channel_id: Channel ID (default: 1)
-        Returns:
-            JPEG image bytes
-        """
         endpoint = f"GetSnapshot/{channel_id}" if channel_id > 1 else "GetSnapshot"
         url = f"{self._base_url}/{endpoint}"
         client = await self._get_client()
@@ -177,99 +155,51 @@ class ProvisionClient:
         except httpx.RequestError as err:
             raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
+    # ------------------------------------------------------------------
+    # Motion config helpers
+    # ------------------------------------------------------------------
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
-        """Get motion detection configuration.
-        
-        Args:
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            Motion configuration dict
-        """
+        """Return the motion configuration dict (just the <motion> node)."""
         endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
-        response = await self._request(endpoint)
-        config = response.get("config", {})
-        return config.get("motion", {})
- 
+        response = await self._request(endpoint)  # default GET
+        return response.get("config", {}).get("motion", {})
+
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
-        
-        Args:
-            enabled: True to enable, False to disable
-            channel_id: Channel ID (default: 1)
-            
-        Returns:
-            True if successful
+
+        Returns True if sensor state changed successfully.
         """
-        # First get current config
-        motion_config = await self.get_motion_config(channel_id)
-        
-        # Update switch value
-        motion_config["switch"] = enabled
-        
-        # Build XML request
-        xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
-<config version="1.0" xmlns="http://www.ipc.com/ver10">
-    <motion>
-        <switch>{str(enabled).lower()}</switch>
-    </motion>
-</config>"""
-        
+        # Grab current config
+        motion_cfg = await self.get_motion_config(channel_id)
+
+        # Build the XML payload
+        xml_payload = _build_motion_xml(self, motion_cfg, enabled)
+
+        # DEBUG
+        _LOGGER.debug("Sending SetMotionConfig XML: %s", xml_payload)
+
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
-        await self._request(endpoint, method="POST", data=xml_data)
-        return True
+        await self._request(endpoint, method="POST", data=xml_payload)
+
+        # Verify new state
+        new_cfg = await self.get_motion_config(channel_id)
+        new_switch = new_cfg.get("switch", {}).get("#text", "false")
+        return new_switch == ("true" if enabled else "false")
 
     async def get_alarm_status(self) -> dict[str, Any]:
-        """Get current alarm status.
-        Returns:
-            Alarm status dict with motion, sensor, and other alarms
-        """
         response = await self._request("GetAlarmStatus")
-        config = response.get("config", {})
-        return config.get("alarmStatusInfo", {})
+        return response.get("config", {}).get("alarmStatusInfo", {})
 
-    async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-            _LOGGER.debug("Client connection closed")
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client.
-        Returns:
-            Configured httpx.AsyncClient
-        """
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                auth=self._auth,
-                timeout=self._timeout,
-                follow_redirects=True,
-                headers={
-                    "Content-Type": "application/xml; charset=UTF-8",
-                    "Connection": "Keep-Alive",
-                },
-            )
-        return self._client
-
+    # ------------------------------------------------------------------
+    # Generic request/response handling
+    # ------------------------------------------------------------------
     async def _request(
         self,
         endpoint: str,
-        method: str = "POST",
+        method: str = "GET",          # <-- default changed to GET
         data: str | None = None,
     ) -> dict[str, Any]:
-        """Make authenticated request to the device.
-        Args:
-            endpoint: API endpoint (e.g., "GetDeviceInfo")
-            method: HTTP method (POST or GET)
-            data: XML data for POST requests
-        Returns:
-            Parsed XML response as dictionary
-        Raises:
-            AuthenticationError: On 401 response
-            ProvisionError: On API errors
-            ProvisionConnectionError: On connection failures
-        """
+        """Make an authenticated request to the device."""
         url = f"{self._base_url}/{endpoint}"
         client = await self._get_client()
 
@@ -279,7 +209,7 @@ class ProvisionClient:
             if method == "POST":
                 headers = {"Content-Type": "text/xml; charset=UTF-8"}
                 response = await client.post(url, content=data, headers=headers)
-            else:
+            else:  # GET
                 response = await client.get(url)
 
             _LOGGER.debug(
@@ -287,14 +217,17 @@ class ProvisionClient:
                 endpoint,
                 response.status_code,
             )
-            _LOGGER.debug("Response text: %s", response.text[:500] if response.text else "Empty")
+            _LOGGER.debug(
+                "Response text: %s",
+                response.text[:500] if response.text else "Empty",
+            )
 
             # Handle HTTP status codes
             if response.status_code == HTTP_UNAUTHORIZED:
                 raise AuthenticationError("Invalid username or password")
 
             if response.status_code == HTTP_BAD_REQUEST:
-                # Parse error from response
+                # Parse error from the response
                 error_data = self._parse_xml(response.text)
                 error_code = error_data.get("config", {}).get("@errorCode")
                 self._raise_api_error(error_code)
@@ -313,12 +246,7 @@ class ProvisionClient:
             raise ProvisionConnectionError(f"Request failed: {err}") from err
 
     def _parse_xml(self, xml_text: str) -> dict[str, Any]:
-        """Parse XML response to dictionary.
-        Args:
-            xml_text: XML string
-        Returns:
-            Parsed XML as dictionary
-        """
+        """Parse XML text to a dictionary."""
         try:
             return xmltodict.parse(xml_text)
         except Exception as err:
@@ -326,16 +254,11 @@ class ProvisionClient:
             raise InvalidXMLFormatError(f"Invalid XML format: {err}") from err
 
     def _raise_api_error(self, error_code: str | None) -> None:
-        """Raise appropriate exception based on error code.
-        Args:
-            error_code: Error code from API response
-        Raises:
-            Appropriate ProvisionError subclass
-        """
+        """Raise the appropriate exception based on the device error code."""
         error_map = {
             "1": InvalidRequestError("Invalid request URL or parameters"),
             "2": InvalidXMLFormatError("Invalid XML format"),
-            "3": InvalidXMLContentError("Invalid XML content or out-of-range parameters"),
+            "3": InvalidXMLContentError("Invalid XML content or out‑of-range parameters"),
             "4": PermissionDeniedError("Permission denied"),
             "5": ProvisionError("Network port number error"),
         }
@@ -343,11 +266,12 @@ class ProvisionClient:
         exception = error_map.get(error_code, ProvisionError(f"Unknown error code: {error_code}"))
         raise exception
 
-    async def __aenter__(self) -> ProvisionClient:
-        """Async context manager entry."""
+    # ------------------------------------------------------------------
+    # Async context manager support
+    # ------------------------------------------------------------------
+    async def __aenter__(self) -> "ProvisionClient":
         await self.connect()
         return self
 
     async def __aexit__(self, *args) -> None:
-        """Async context manager exit."""
         await self.close()
