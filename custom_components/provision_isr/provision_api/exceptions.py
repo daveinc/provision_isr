@@ -1,5 +1,4 @@
 """Exceptions for Provision ISR API client."""
-from __future__ import annotations
 
 class ProvisionError(Exception):
     """Base exception for Provision ISR API errors."""
