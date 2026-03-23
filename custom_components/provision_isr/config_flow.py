@@ -28,7 +28,10 @@ from .const import (
 )
 from .discovery import discover_devices
 from .provision_api import ProvisionClient
-from .provision_api.exceptions import AuthenticationError, ConnectionError
+from .provision_api.exceptions import (
+    AuthenticationError,
+    ProvisionConnectionError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +45,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-# -------------   <---  NEW: fixed base‑class header ------------------
 class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Provision ISR."""
 
@@ -53,8 +55,9 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_devices: list[dict[str, Any]] = []
         self._manual_entry = False
 
-    async def async_step_user(  # pragma: no cover
-        self, user_input: dict[str, Any] | None = None
+    async def async_step_user(
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Handle the initial step - discovery."""
         if user_input is not None:
@@ -75,8 +78,6 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Build options list
         device_options = {d["name"]: d["name"] for d in self._discovered_devices}
-
-        # Always add manual entry option
         device_options["manual"] = "Manual Entry"
 
         if len(self._discovered_devices) > 0:
@@ -93,7 +94,9 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_credentials(
-        self, device_info: dict[str, Any], user_input: dict[str, Any] | None = None
+        self,
+        device_info: dict[str, Any],
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Handle credentials entry for discovered device."""
         errors = {}
@@ -103,7 +106,6 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
             user_input[CONF_HOST] = device_info[CONF_HOST]
             user_input[CONF_PORT] = device_info[CONF_PORT]
 
-            # <--- NEW: close the client in finally -----------------
             result = await self._test_connection(user_input)
             if result["success"]:
                 # Store MAC address for IP change detection
@@ -114,7 +116,8 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
-                    title=result["model"], data=user_input
+                    title=result["model"],
+                    data=user_input,
                 )
 
             errors["base"] = result["error"]
@@ -136,7 +139,8 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_manual(
-        self, user_input: dict[str, Any] | None = None
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Handle manual device entry."""
         errors = {}
@@ -150,17 +154,21 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
-                    title=result["model"], data=user_input
+                    title=result["model"],
+                    data=user_input,
                 )
 
             errors["base"] = result["error"]
 
         return self.async_show_form(
-            step_id="manual", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="manual",
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
         )
 
     async def _test_connection(
-        self, config: dict[str, Any]
+        self,
+        config: dict[str, Any],
     ) -> dict[str, Any]:
         """Test connection to device.
 
@@ -175,7 +183,7 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
                 password=config[CONF_PASSWORD],
             )
 
-            # <--- NEW: ensure the client is closed on all outcomes --------
+            # Ensure the client is closed on all outcomes
             try:
                 await client.connect()
                 device_info = await client.get_device_info()
@@ -196,7 +204,7 @@ class ProvisionISRConfigFlow(ConfigFlow, domain=DOMAIN):
                 "model": None,
                 "error": "invalid_auth",
             }
-        except ConnectionError:
+        except ProvisionConnectionError:
             return {
                 "success": False,
                 "mac": None,
@@ -225,7 +233,8 @@ class ProvisionISROptionsFlow(OptionsFlow):
     """Handle options flow for Provision ISR."""
 
     async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
@@ -237,7 +246,10 @@ class ProvisionISROptionsFlow(OptionsFlow):
                 {
                     vol.Optional(
                         CONF_AUTO_DETECT_IP,
-                        default=self.config_entry.options.get(CONF_AUTO_DETECT_IP, False),
+                        default=self.config_entry.options.get(
+                            CONF_AUTO_DETECT_IP,
+                            False,
+                        ),
                     ): cv.boolean,
                 }
             ),
