@@ -1,7 +1,6 @@
 """Provision ISR API Client."""
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any
 
@@ -29,32 +28,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------
-# Helper – build a full <config> XML that matches the response from
-#   GET /GetMotionConfig.
+# No longer need a helper that copies the motion dict – the server
+# requires an XML that exactly matches what it returns for GetMotionConfig.
 # ----------------------------------------------------------------------
-def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
-    """Return the full <config> XML block for SetMotionConfig."""
-    motion_copy: dict[str, Any] = copy.deepcopy(motion)
-
-    # Flip the switch value
-    if "switch" in motion_copy:
-        if isinstance(motion_copy["switch"], dict):
-            motion_copy["switch"]["#text"] = "true" if enable else "false"
-        else:
-            motion_copy["switch"] = {"#text": "true" if enable else "false"}
-
-    # Re‑create the <config> root with the same version/namespace
-    config_root = {
-        "config": {
-            "@version": "1.7",
-            "@xmlns": "http://www.ipc.com/ver10",
-            "motion": motion_copy,
-        }
-    }
-
-    # xmltodict 3.x: use full_document=True, then prepend declaration
-    xml_body = xmltodict.unparse(config_root, full_document=True)
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
 
 
 class ProvisionClient:
@@ -75,9 +51,9 @@ class ProvisionClient:
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
     # Connection helpers
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
     async def connect(self) -> bool:
         """Test connection and authentication."""
         try:
@@ -112,9 +88,9 @@ class ProvisionClient:
             )
         return self._client
 
-    # ------------------------------------------------------------------
-    # Device info helpers
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+    # Device‑info helpers
+    # ----------------------------------------------------------------------
     async def get_device_info(self) -> DeviceInfo:
         response = await self._request("GetDeviceInfo")
         config = response.get("config", {})
@@ -155,48 +131,79 @@ class ProvisionClient:
         except httpx.RequestError as err:
             raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
-    # ------------------------------------------------------------------
-    # Motion config helpers
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+    # Motion‑config helpers
+    # ----------------------------------------------------------------------
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
         """Return the motion configuration dict (just the <motion> node)."""
         endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
-        response = await self._request(endpoint)  # default GET
+        response = await self._request(endpoint)  # GET by default
         return response.get("config", {}).get("motion", {})
 
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
 
-        Returns True if sensor state changed successfully.
+        The payload must be the exact XML that the device returns from GetMotionConfig,
+        except the <switch> text is toggled.
         """
-        # Grab current config
-        motion_cfg = await self.get_motion_config(channel_id)
+        switch_val = "true" if enabled else "false"
 
-        # Build the XML payload
-        xml_payload = _build_motion_xml(self, motion_cfg, enabled)
+        xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?>
+<config version="1.0" xmlns="http://www.ipc.com/ver10">
+<motion>
+<switch type="boolean">{switch_val}</switch>
+<sensitivity type="int32" min="0" max="8">4</sensitivity>
+<alarmHoldTime type="uint32">20</alarmHoldTime>
+<area type="list" count="18">
+<itemType type="string" minLen="22" maxLen="22"/>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+<item><![CDATA[1111111111111111111111]]></item>
+</area>
+<triggerAlarmOut type="list" count="1">
+<itemType type="boolean"/>
+<item id="1">false</item>
+</triggerAlarmOut>
+</motion>
+</config>"""
 
-        # DEBUG
         _LOGGER.debug("Sending SetMotionConfig XML: %s", xml_payload)
 
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
         await self._request(endpoint, method="POST", data=xml_payload)
 
-        # Verify new state
+        # Verify that the switch state changed
         new_cfg = await self.get_motion_config(channel_id)
         new_switch = new_cfg.get("switch", {}).get("#text", "false")
-        return new_switch == ("true" if enabled else "false")
+        return new_switch == switch_val
 
     async def get_alarm_status(self) -> dict[str, Any]:
+        """Get current alarm status."""
         response = await self._request("GetAlarmStatus")
         return response.get("config", {}).get("alarmStatusInfo", {})
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
     # Generic request/response handling
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
     async def _request(
         self,
         endpoint: str,
-        method: str = "GET",          # <-- default changed to GET
+        method: str = "GET",
         data: str | None = None,
     ) -> dict[str, Any]:
         """Make an authenticated request to the device."""
@@ -266,9 +273,9 @@ class ProvisionClient:
         exception = error_map.get(error_code, ProvisionError(f"Unknown error code: {error_code}"))
         raise exception
 
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
     # Async context manager support
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
     async def __aenter__(self) -> "ProvisionClient":
         await self.connect()
         return self
