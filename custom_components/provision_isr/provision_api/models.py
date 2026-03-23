@@ -1,234 +1,334 @@
-"""Data models for Provision ISR."""
+"""Data models for Provision ISR API responses."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
-@dataclass
-class DeviceCapabilities:
-    """Device capability flags from GetDeviceInfo."""
+
+def _extract_value(data: dict[str, Any], key: str, default: Any = None) -> Any:
+    """Extract value from XML dict, handling CDATA and type attributes.
     
-    # Motion and basic alarms
-    support_motion_sens: bool = False
-    support_pea: bool = False  # Perimeter/Intrusion detection
-    support_osc: bool = False  # Object removal
-    support_avd: bool = False  # Scene change/Video abnormality
-    
-    # Advanced analytics
-    support_vfd: bool = False  # Face detection
-    support_vfd_match: bool = False  # Face comparison
-    support_vfd_detect: bool = False  # Face detection (alternative)
-    support_cpc: bool = False  # People counting
-    support_cdd: bool = False  # Crowd density
-    support_ipd: bool = False  # People intrusion
-    support_vehice: bool = False  # License plate (note typo in API)
-    support_aoi_entry: bool = False  # Region entrance
-    support_aoi_leave: bool = False  # Region exiting
-    support_pass_line_count: bool = False  # Line crossing counting
-    support_traffic: bool = False  # Traffic counting
-    
-    # Hardware features
-    support_sd_card: bool = False
-    support_ptz: bool = False
-    support_rs485_ptz: bool = False
-    support_infrared_lamp: bool = False
-    support_wiper: bool = False
-    
-    # Audio features
-    audio_in_count: int = 0
-    audio_out_count: int = 0
-    support_audio_alarm_out: bool = False
-    
-    # Alarm I/O
-    alarm_in_count: int = 0
-    alarm_out_count: int = 0
-    support_white_light_alarm_out: bool = False
-    
-    # Network and protocols
-    support_p2p_service: bool = False
-    support_pppoe: bool = False
-    support_https: bool = False
-    support_rtmp: bool = False
-    support_ftp: bool = False
-    support_snmp: bool = False
-    support_apilong_polling: bool = False
-    
-    # Other features
-    support_roi: bool = False  # Region of Interest
-    support_private_zone: bool = False
-    support_watermark: bool = False
-    support_anonymous_login: bool = False
-    support_http_post: bool = False
-    
-    # Channel count
-    chl_max_count: int = 1
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> DeviceCapabilities:
-        """Create capabilities from device info XML data."""
-        caps = cls()
+    Args:
+        data: Dictionary from xmltodict
+        key: Key to extract
+        default: Default value if key not found
         
-        # Extract deviceInfo section
-        device_info = data.get("deviceInfo", {})
-        if isinstance(device_info, dict):
-            # Motion and alarm capabilities
-            caps.support_motion_sens = device_info.get("supportMotionSens", {}).get("#text", "false") == "true"
-            caps.support_pea = device_info.get("supportPea", {}).get("#text", "false") == "true"
-            caps.support_osc = device_info.get("supportOsc", {}).get("#text", "false") == "true"
-            caps.support_avd = device_info.get("supportAvd", {}).get("#text", "false") == "true"
-            
-            # Advanced analytics
-            caps.support_vfd = device_info.get("supportVfd", {}).get("#text", "false") == "true"
-            caps.support_vfd_match = device_info.get("supportVfdMatch", {}).get("#text", "false") == "true"
-            caps.support_vfd_detect = device_info.get("supportVfdDetect", {}).get("#text", "false") == "true"
-            caps.support_cpc = device_info.get("supportCpc", {}).get("#text", "false") == "true"
-            caps.support_cdd = device_info.get("supportCdd", {}).get("#text", "false") == "true"
-            caps.support_ipd = device_info.get("supportIpd", {}).get("#text", "false") == "true"
-            caps.support_vehice = device_info.get("supportVehice", {}).get("#text", "false") == "true"  # Note typo
-            caps.support_aoi_entry = device_info.get("supportAoiEntry", {}).get("#text", "false") == "true"
-            caps.support_aoi_leave = device_info.get("supportAoiLeave", {}).get("#text", "false") == "true"
-            caps.support_pass_line_count = device_info.get("supportPassLineCount", {}).get("#text", "false") == "true"
-            caps.support_traffic = device_info.get("supportTraffic", {}).get("#text", "false") == "true"
-            
-            # Hardware features
-            caps.support_sd_card = device_info.get("supportSDCard", {}).get("#text", "false") == "true"
-            caps.support_ptz = device_info.get("integratedPtz", {}).get("#text", "false") == "true"
-            caps.support_rs485_ptz = device_info.get("supportRS485Ptz", {}).get("#text", "false") == "true"
-            caps.support_infrared_lamp = device_info.get("supportInfraredLamp", {}).get("#text", "false") == "true"
-            caps.support_wiper = device_info.get("supportWiper", {}).get("#text", "false") == "true"
-            
-            # Audio features
-            caps.audio_in_count = int(device_info.get("audioInCount", {}).get("#text", "0"))
-            caps.audio_out_count = int(device_info.get("audioOutCount", {}).get("#text", "0"))
-            caps.support_audio_alarm_out = device_info.get("supportAudioAlarmOut", {}).get("#text", "false") == "true"
-            
-            # Alarm I/O
-            caps.alarm_in_count = int(device_info.get("alarmInCount", {}).get("#text", "0"))
-            caps.alarm_out_count = int(device_info.get("alarmOutCount", {}).get("#text", "0"))
-            caps.support_white_light_alarm_out = device_info.get("supportWhiteLightAlarmOut", {}).get("#text", "false") == "true"
-            
-            # Network and protocols
-            caps.support_p2p_service = device_info.get("supportP2PService", {}).get("#text", "false") == "true"
-            caps.support_pppoe = device_info.get("supportPPPoE", {}).get("#text", "false") == "true"
-            caps.support_https = device_info.get("supportHttps", {}).get("#text", "false") == "true"
-            caps.support_rtmp = device_info.get("supportRtmp", {}).get("#text", "false") == "true"
-            caps.support_ftp = device_info.get("supportFtp", {}).get("#text", "false") == "true"
-            caps.support_snmp = device_info.get("supportSnmp", {}).get("#text", "false") == "true"
-            caps.support_apilong_polling = device_info.get("supportAPILongPolling", {}).get("#text", "false") == "true"
-            
-            # Other features
-            caps.support_roi = device_info.get("supportROI", {}).get("#text", "false") == "true"
-            caps.support_private_zone = device_info.get("supportPrivateZone", {}).get("#text", "false") == "true"
-            caps.support_watermark = device_info.get("supportWatermark", {}).get("#text", "false") == "true"
-            caps.support_anonymous_login = device_info.get("supportAnonymousLogin", {}).get("#text", "false") == "true"
-            caps.support_http_post = device_info.get("SupportHttpPost", {}).get("#text", "false") == "true"
-            
-            # Channel count
-            caps.chl_max_count = int(device_info.get("chlMaxCount", {}).get("#text", "1"))
-        
-        return caps
+    Returns:
+        Extracted value
+    """
+    value = data.get(key, default)
+    
+    # Handle CDATA wrapper
+    if isinstance(value, dict) and "#text" in value:
+        return value["#text"]
+    
+    # Handle boolean strings
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    
+    # Handle numeric strings
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    
+    return value
+
 
 @dataclass
 class DeviceInfo:
-    """Device information."""
+    """Device information from GetDeviceInfo."""
+    
     device_name: str
-    device_number: str
-    serial_number: str
     model: str
     brand: str
-    ip_address: str
-    mac_address: str
+    device_description: str
     software_version: str
+    software_build_date: str
     hardware_version: str
-    capabilities: DeviceCapabilities
+    mac: str
+    serial_number: str
+    api_version: str
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> DeviceInfo:
-        """Create DeviceInfo from XML response."""
-        # Extract deviceInfo section
-        device_data = data.get("deviceInfo", {})
-        
-        # Parse capabilities first
-        capabilities = DeviceCapabilities.from_dict(data)
-        
-        return cls(
-            device_name=device_data.get("deviceName", {}).get("#text", ""),
-            device_number=device_data.get("deviceNumber", {}).get("#text", ""),
-            serial_number=device_data.get("sn", {}).get("#text", ""),
-            model=device_data.get("model", {}).get("#text", ""),
-            brand=device_data.get("brand", {}).get("#text", ""),
-            ip_address=device_data.get("ipAddress", {}).get("#text", ""),
-            mac_address=device_data.get("mac", {}).get("#text", ""),
-            software_version=device_data.get("softwareVersion", {}).get("#text", ""),
-            hardware_version=device_data.get("hardwareVersion", {}).get("#text", ""),
-            capabilities=capabilities,
-        )
+    # Channel counts
+    channel_max_count: int
+    audio_in_count: int = 0
+    audio_out_count: int = 0
+    alarm_in_count: int = 0
+    alarm_out_count: int = 0
     
-    def is_nvr(self) -> bool:
-        """Check if device is an NVR (multiple channels)."""
-        return self.capabilities.chl_max_count > 1
+    # Capabilities
+    integrated_ptz: bool = False
+    support_rs485_ptz: bool = False
+    support_sd_card: bool = False
+    support_api_long_polling: bool = False
+    support_motion_sens: bool = False
+    support_https: bool = False
+    support_alarm_server: bool = False
     
-    @property
-    def support_motion_sens(self) -> bool:
-        """Convenience property for motion sensor support."""
-        return self.capabilities.support_motion_sens
+    # Additional info
+    device_type: int | None = None
+    onvif_version: str | None = None
+    kernel_version: str | None = None
+    device_activated: bool = True
 
-# Keep your existing Channel, ChannelList, DiskInfo, StreamCaps models below...
-# [Your existing Channel, ChannelList, DiskInfo, StreamCaps classes here]
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeviceInfo:
+        """Create DeviceInfo from parsed XML dict.
+        
+        Args:
+            data: Dictionary from xmltodict parsing of deviceInfo element
+            
+        Returns:
+            DeviceInfo instance
+        """
+        return cls(
+            device_name=_extract_value(data, "deviceName", "Unknown"),
+            model=_extract_value(data, "model", "Unknown"),
+            brand=_extract_value(data, "brand", "Provision ISR"),
+            device_description=_extract_value(data, "deviceDescription", "IP Camera"),
+            software_version=_extract_value(data, "softwareVersion", "Unknown"),
+            software_build_date=_extract_value(data, "softwareBuildDate", "Unknown"),
+            hardware_version=_extract_value(data, "hardwareVersion", "Unknown"),
+            mac=_extract_value(data, "mac", "00:00:00:00:00:00"),
+            serial_number=_extract_value(data, "sn", "Unknown"),
+            api_version=_extract_value(data, "apiVersion", "1.0"),
+            channel_max_count=int(_extract_value(data, "chlMaxCount", 1)),
+            audio_in_count=int(_extract_value(data, "audioInCount", 0)),
+            audio_out_count=int(_extract_value(data, "audioOutCount", 0)),
+            alarm_in_count=int(_extract_value(data, "alarmInCount", 0)),
+            alarm_out_count=int(_extract_value(data, "alarmOutCount", 0)),
+            integrated_ptz=_extract_value(data, "integratedPtz", False),
+            support_rs485_ptz=_extract_value(data, "supportRS485Ptz", False),
+            support_sd_card=_extract_value(data, "supportSDCard", False),
+            support_api_long_polling=_extract_value(data, "supportAPILongPolling", False),
+            support_motion_sens=_extract_value(data, "supportMotionSens", False),
+            support_https=_extract_value(data, "supportHttps", False),
+            support_alarm_server=_extract_value(data, "supportAlarmServer", False),
+            device_type=_extract_value(data, "deviceType"),
+            onvif_version=_extract_value(data, "onvifVer"),
+            kernel_version=_extract_value(data, "kernelVersion"),
+            device_activated=_extract_value(data, "deviceActivated", True),
+        )
+
+    def is_nvr(self) -> bool:
+        """Check if device is an NVR (multiple channels).
+        
+        Returns:
+            True if device appears to be an NVR
+        """
+        # If max channel count > 1, it's likely an NVR
+        # Also check device description
+        return (
+            self.channel_max_count > 1
+            or "NVR" in self.device_description.upper()
+        )
+
 
 @dataclass
 class Channel:
     """Channel information."""
-    channel_id: str
-    name: str
-    is_online: bool
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Channel:
-        return cls(
-            channel_id=data.get("@id", ""),
-            name=data.get("name", {}).get("#text", ""),
-            is_online=data.get("online", {}).get("#text", "false") == "true",
-        )
+    channel_id: str
+    status: str  # online, offline, videoOn, videoLoss
+    
+    @property
+    def is_online(self) -> bool:
+        """Check if channel is online."""
+        return self.status in ("online", "videoOn")
+
 
 @dataclass
 class ChannelList:
-    """Channel list for NVR."""
-    channels: List[Channel]
+    """Channel list from GetChannelList (NVR only)."""
+    
+    channels: list[Channel]
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ChannelList:
-        channels_data = data.get("channelList", {}).get("item", [])
-        if not isinstance(channels_data, list):
-            channels_data = [channels_data]
+    def from_dict(cls, data: dict[str, Any]) -> ChannelList:
+        """Create ChannelList from parsed XML dict.
         
-        channels = [Channel.from_dict(channel) for channel in channels_data]
+        Args:
+            data: Dictionary from xmltodict parsing
+            
+        Returns:
+            ChannelList instance
+        """
+        channels = []
+        channel_list = data.get("channelIDList", {})
+        
+        # Handle list items
+        items = channel_list.get("item", [])
+        if not isinstance(items, list):
+            items = [items]
+        
+        for item in items:
+            if isinstance(item, dict):
+                channel_id = item.get("#text", "")
+                status = item.get("@channelStatus", "offline")
+            else:
+                # Simple string value
+                channel_id = str(item)
+                status = "online"
+            
+            channels.append(Channel(channel_id=channel_id, status=status))
+        
         return cls(channels=channels)
+
 
 @dataclass
 class DiskInfo:
-    """Disk information."""
-    total_size: int
-    free_size: int
-    used_size: int
+    """Disk information from GetDiskInfo."""
+    
+    total_space_mb: int
+    free_space_mb: int
+    status: str  # read, read/write, unformat, formatting, exception
+    disk_id: str | None = None
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> DiskInfo:
+    def from_dict(cls, data: dict[str, Any]) -> DiskInfo:
+        """Create DiskInfo from parsed XML dict.
+        
+        Args:
+            data: Dictionary from xmltodict parsing
+            
+        Returns:
+            DiskInfo instance
+        """
+        disk_list = data.get("diskInfo", {})
+        items = disk_list.get("item", [])
+        
+        # Take first disk if multiple
+        if isinstance(items, list) and items:
+            disk_data = items[0]
+        elif isinstance(items, dict):
+            disk_data = items
+        else:
+            # No disk found
+            return cls(
+                total_space_mb=0,
+                free_space_mb=0,
+                status="exception",
+            )
+        
         return cls(
-            total_size=int(data.get("totalSize", {}).get("#text", "0")),
-            free_size=int(data.get("freeSize", {}).get("#text", "0")),
-            used_size=int(data.get("usedSize", {}).get("#text", "0")),
+            disk_id=_extract_value(disk_data, "id"),
+            total_space_mb=_extract_value(disk_data, "totalSpace", 0),
+            free_space_mb=_extract_value(disk_data, "freeSpace", 0),
+            status=_extract_value(disk_data, "diskStatus", "exception"),
         )
+    
+    @property
+    def is_healthy(self) -> bool:
+        """Check if disk is healthy and writable."""
+        return self.status in ("read/write", "read")
+
+
+@dataclass
+class StreamInfo:
+    """Individual stream information."""
+    
+    stream_id: int
+    stream_name: str
+    resolution: str
+    max_frame_rate: int
+    encode_type: str
+    
+    def get_rtsp_url(self, host: str, port: int, username: str, password: str, is_nvr: bool = False, channel_id: int = 1) -> str:
+        """Build RTSP URL for this stream.
+        
+        Args:
+            host: Device IP
+            port: RTSP port
+            username: Username for auth
+            password: Password for auth
+            is_nvr: True if device is NVR, False if standalone camera
+            channel_id: Channel ID (for NVR)
+            
+        Returns:
+            RTSP URL
+        """
+        if is_nvr:
+            # NVR format: rtsp://user:pass@host:port?chID=X&streamType=main
+            stream_type = "main" if self.stream_id == 1 else "sub"
+            return f"rtsp://{username}:{password}@{host}:{port}?chID={channel_id}&streamType={stream_type}"
+        else:
+            # IPC format: rtsp://user:pass@host:port/streamName
+            return f"rtsp://{username}:{password}@{host}:{port}/{self.stream_name}"
+
 
 @dataclass
 class StreamCaps:
-    """Stream capabilities."""
-    main_stream: Dict[str, Any]
-    sub_stream: Dict[str, Any]
+    """Stream capabilities from GetStreamCaps."""
+    
+    rtsp_port: int
+    streams: list[StreamInfo]
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> StreamCaps:
+    def from_dict(cls, data: dict[str, Any]) -> StreamCaps:
+        """Create StreamCaps from parsed XML dict.
+        
+        Args:
+            data: Dictionary from xmltodict parsing
+            
+        Returns:
+            StreamCaps instance
+        """
+        rtsp_port = _extract_value(data, "rtspPort", 554)
+        
+        stream_list = data.get("streamList", {})
+        items = stream_list.get("item", [])
+        
+        if not isinstance(items, list):
+            items = [items]
+        
+        streams = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            
+            stream_id = int(item.get("@id", 0))
+            stream_name = _extract_value(item, "streamName", f"profile{stream_id}")
+            
+            # Get resolution capabilities
+            resolution_caps = item.get("resolutionCaps", {})
+            res_items = resolution_caps.get("item", [])
+            if not isinstance(res_items, list):
+                res_items = [res_items]
+            
+            # Take first resolution option
+            resolution = "1920x1080"  # default
+            max_frame_rate = 25  # default
+            
+            if res_items and isinstance(res_items[0], dict):
+                resolution = _extract_value(res_items[0], "#text", resolution)
+                max_frame_rate = _extract_value(res_items[0], "@maxFrameRate", max_frame_rate)
+            elif res_items and isinstance(res_items[0], str):
+                resolution = res_items[0]
+            
+            # Get encode type
+            encode_caps = item.get("encodeTypeCaps", {})
+            enc_items = encode_caps.get("item", [])
+            if not isinstance(enc_items, list):
+                enc_items = [enc_items]
+            
+            encode_type = enc_items[0] if enc_items else "h264"
+            
+            streams.append(StreamInfo(
+                stream_id=stream_id,
+                stream_name=stream_name,
+                resolution=resolution,
+                max_frame_rate=max_frame_rate,
+                encode_type=encode_type,
+            ))
+        
         return cls(
-            main_stream=data.get("mainStream", {}),
-            sub_stream=data.get("subStream", {}),
+            rtsp_port=rtsp_port,
+            streams=streams,
         )
+    
+    def get_main_stream(self) -> StreamInfo | None:
+        """Get main stream (highest quality)."""
+        return self.streams[0] if self.streams else None
+    
+    def get_sub_stream(self) -> StreamInfo | None:
+        """Get sub stream (lower quality for preview)."""
+        return self.streams[1] if len(self.streams) > 1 else None
