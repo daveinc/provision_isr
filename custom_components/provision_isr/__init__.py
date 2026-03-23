@@ -4,7 +4,13 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME, Platform
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_USERNAME,
+    Platform,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
@@ -21,21 +27,15 @@ PLATFORMS: list[Platform] = [
 ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Provision ISR from a config entry.
-
-    If auto‑detection of the device IP changes the entry, the integration is
-    re‑loaded automatically (by returning ``False``).  This guarantees that
-    only a single client instance is created.
-    """
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> bool:
+    """Set up Provision ISR from a config entry."""
     # Check if IP auto‑detection is enabled
     if entry.options.get(CONF_AUTO_DETECT_IP, False):
-        ip_changed = await _auto_detect_ip_change(hass, entry)
-        if ip_changed:
-            # The caller needs to reload the integration to pick up the new IP.
-            return False
+        await _auto_detect_ip_change(hass, entry)
 
-    # Create API client
+    # Create the client
     client = ProvisionClient(
         host=entry.data[CONF_HOST],
         port=entry.data[CONF_PORT],
@@ -67,14 +67,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.exception("Unexpected error during setup")
         raise ConfigEntryNotReady(f"Setup failed: {err}") from err
 
-    # Store client and device info
+    # Store client & device info
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
         "device_info": device_info,
     }
 
-    # Start long polling for motion events if supported
+    # Start long polling if supported
     if device_info.support_api_long_polling and device_info.support_motion_sens:
         from .long_polling import ProvisionLongPolling
 
@@ -103,14 +103,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Unload platforms
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+    if unload_ok := await hass.config_entries.async_unload_platforms(
+        entry, PLATFORMS
+    ):
         # Stop long polling if running
-        long_polling = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).pop("long_polling", None)
+        long_polling = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).pop(
+            "long_polling", None
+        )
         if long_polling:
             await long_polling.stop()
 
-        # Close client connection
+        # Close client
         client = hass.data[DOMAIN][entry.entry_id]["client"]
         await client.close()
 
@@ -122,11 +125,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-async def _auto_detect_ip_change(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def _auto_detect_ip_change(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> bool:
     """Auto‑detect if the device IP has changed and update the config entry.
 
-    Returns ``True`` if the IP was changed and the entry was updated,
-    ``False`` otherwise.
+    Returns True if the device IP changed and the entry was updated; False otherwise.
     """
     if CONF_MAC_ADDRESS not in entry.data:
         _LOGGER.debug("No MAC address stored, skipping IP auto‑detection")
@@ -140,14 +144,9 @@ async def _auto_detect_ip_change(hass: HomeAssistant, entry: ConfigEntry) -> boo
 
         _LOGGER.debug("Checking for IP changes (MAC: %s)…", stored_mac)
 
-        # Discover devices
         devices = await discover_devices(hass)
 
-        # Try to connect to each discovered device
-        from .provision_api import ProvisionClient
-
         for device in devices:
-            # Skip if same IP as current
             if device[CONF_HOST] == current_host:
                 continue
 
@@ -165,7 +164,6 @@ async def _auto_detect_ip_change(hass: HomeAssistant, entry: ConfigEntry) -> boo
             finally:
                 await client.close()
 
-            # Check if MAC matches
             if device_info.mac == stored_mac:
                 _LOGGER.warning(
                     "Device IP changed from %s to %s (MAC: %s)",
@@ -174,7 +172,6 @@ async def _auto_detect_ip_change(hass: HomeAssistant, entry: ConfigEntry) -> boo
                     stored_mac,
                 )
 
-                # Update config entry
                 await hass.config_entries.async_update_entry(
                     entry,
                     data={
@@ -183,7 +180,7 @@ async def _auto_detect_ip_change(hass: HomeAssistant, entry: ConfigEntry) -> boo
                         CONF_PORT: device[CONF_PORT],
                     },
                 )
-                return True  # IP changed and config updated
+                return True
 
         _LOGGER.debug("No IP change detected")
         return False
