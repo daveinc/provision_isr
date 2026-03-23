@@ -3,9 +3,9 @@
 This module re‑exports the public API that the Home Assistant
 integration expects:
 
-* The main client class – `ProvisionClient`.
+* The main client class – ``ProvisionClient``.
 * All data‑model classes (`ChannelList`, `DeviceInfo`, etc.).
-* The entire exception hierarchy – including the renamed
+* The full exception hierarchy – including the renamed
   ``ProvisionConnectionError``.
 """
 
@@ -22,7 +22,7 @@ from .models import (  # noqa: F401
 )
 
 # Re‑export the exception hierarchy
-from .exceptions import (
+from .exceptions import (  # noqa: F401
     ProvisionError,
     ProvisionConnectionError,
     AuthenticationError,
@@ -30,7 +30,7 @@ from .exceptions import (
     InvalidXMLFormatError,
     InvalidXMLContentError,
     PermissionDeniedError,
-)  # noqa: F401
+)
 
 __all__ = [
     "ProvisionClient",
