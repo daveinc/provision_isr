@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from typing import Any
 
@@ -29,55 +30,42 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------
-# Helper: Build a valid <motion> XML block
+# Helper – build a *full* <config> XML that matches the response from
+#   GET /GetMotionConfig.
+#
+# The function deep‑copies the dict that came from ``xmltodict.parse``.
+# It flips only the ``<switch>`` value and then turns the dict back into XML
+# with xmltodict.unparse, keeping all the attributes (type, count,
+# min/max, xmlns…) exactly as the device sent them.
 # ----------------------------------------------------------------------
-def _build_motion_xml(
-    self, motion: dict[str, Any], enable: bool
-) -> str:
-    """
-    Return XML that keeps the current motion configuration unchanged
-    except for the 'switch' value.
-    """
-    # The camera’s response sometimes nests the motion dict inside a 'motion' key.
-    cfg = motion.get("motion", motion)
+def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
+    """Return the full <config> XML block for SetMotionConfig."""
+    # Shallow‑clone the motion content; all nested nodes stay the same
+    motion_copy: dict[str, Any] = copy.deepcopy(motion)
 
-    switch = "true" if enable else "false"
-    sensitivity = cfg.get("sensitivity", {}).get("#text", "6")
-    alarm_hold_time = cfg.get("alarmHoldTime", {}).get("#text", "3")
+    # Flip the switch value
+    if "switch" in motion_copy:
+        # If the switch node already has a dict with the "#text" key
+        if isinstance(motion_copy["switch"], dict):
+            motion_copy["switch"]["#text"] = "true" if enable else "false"
+        else:  # fallback
+            motion_copy["switch"] = {"#text": "true" if enable else "false"}
 
-    area_items = cfg.get("area", {}).get("item", [])
-    if not isinstance(area_items, list):
-        area_items = [area_items] if area_items else []
+    # Build the complete config dict that matches the original response
+    config_root = {
+        "config": {
+            "@version": "1.7",
+            "@xmlns": "http://www.ipc.com/ver10",
+            "motion": motion_copy,
+        }
+    }
 
-    sens_items = cfg.get("sensitivities", {}).get("item", [])
-    if not isinstance(sens_items, list):
-        sens_items = [sens_items] if sens_items else []
-
-    def xml_items(items: list) -> str:
-        return "\n".join(
-            f"<item><![CDATA[{i.get('#text', '1111111111111111')}]]></item>"
-            for i in items
-        )
-
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<config version="1.0" xmlns="http://www.ipc.com/ver10">
-    <motion>
-        <switch type="boolean">{switch}</switch>
-        <sensitivity type="int32" min="1" max="8">{sensitivity}</sensitivity>
-        <alarmHoldTime type="uint32">{alarm_hold_time}</alarmHoldTime>
-        <area type="list" count="{len(area_items)}">
-            <itemType type="string" minLen="16" maxLen="16"/>
-            {xml_items(area_items)}
-        </area>
-        <sensitivities type="list" count="{len(sens_items)}">
-            <itemType type="string" minLen="16" maxLen="16"/>
-            {xml_items(sens_items)}
-        </sensitivities>
-        <!-- Optional sections ignored because the camera accepts a minimal form -->
-    </motion>
-</config>"""
-
-
+    # Convert back to XML – keep declaration, include attributes
+    return xmltodict.unparse(
+        config_root,
+        full_document=True,
+        xml_declaration=True,
+    )
 class ProvisionClient:
     """Client for Provision ISR device."""
 
@@ -216,20 +204,20 @@ class ProvisionClient:
         # Grab current configuration
         current_motion = await self.get_motion_config(channel_id)
 
-        # Build XML with the new switch value
+        # Build XML that flips the switch only
         xml = _build_motion_xml(self, current_motion, enabled)
 
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
         response = await self._request(endpoint, method="POST", data=xml)
 
-        # Provision API may return a 'code' field for errors
+        # The API sometimes still returns a 200 but with an error code
         if response.get("code") and response["code"] not in ("0", "200"):
             _LOGGER.warning("SetMotionConfig returned error: %s", response)
             return False
 
-        # Double‑check new value
+        # Optionally double‑check the new value
         new_cfg = await self.get_motion_config(channel_id)
-        new_switch = new_cfg.get("motion", {}).get("switch", {}).get("#text", "false")
+        new_switch = new_cfg.get("switch", {}).get("#text", "false")
         return new_switch == ("true" if enabled else "false")
 
     async def get_alarm_status(self) -> dict[str, Any]:
