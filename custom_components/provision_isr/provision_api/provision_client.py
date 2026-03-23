@@ -1,6 +1,7 @@
 """Provision ISR API Client."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from typing import Any
@@ -33,24 +34,24 @@ _LOGGER = logging.getLogger(__name__)
 #   GET /GetMotionConfig.
 #
 # The function deep‑copies the dict that came from ``xmltodict.parse``.
-# It flips only the ``<switch>`` value and then turns the dict back into a
-# string with xmltodict.unparse.  Because the current xmltodict
-# 3.x does not support the ``xml_declaration`` keyword we add the
-# declaration manually afterwards.
+# It flips only the ``<switch>`` value and then turns the dict back into XML
+# with xmltodict.unparse, keeping all the attributes (type, count,
+# min/max, xmlns…) exactly as the device sent them.
 # ----------------------------------------------------------------------
 def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
     """Return the full <config> XML block for SetMotionConfig."""
-    # Make a full, independent copy of the motion config
+    # Shallow‑clone the motion content; all nested nodes stay the same
     motion_copy: dict[str, Any] = copy.deepcopy(motion)
 
-    # Flip the switch
+    # Flip the switch value
     if "switch" in motion_copy:
+        # If the switch node already has a dict with the "#text" key
         if isinstance(motion_copy["switch"], dict):
             motion_copy["switch"]["#text"] = "true" if enable else "false"
-        else:
+        else:  # fallback
             motion_copy["switch"] = {"#text": "true" if enable else "false"}
 
-    # Build the full config dict that lives at the root
+    # Build the complete config dict that matches the original response
     config_root = {
         "config": {
             "@version": "1.7",
@@ -59,11 +60,12 @@ def _build_motion_xml(self, motion: dict[str, Any], enable: bool) -> str:
         }
     }
 
-    # xmltodict 3.x: use full_document=True to add the top‑level
-    xml_body = xmltodict.unparse(config_root, full_document=True)
-
-    # Prepend the XML declaration ourselves (the device expects it)
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
+    # Convert back to XML – keep declaration, include attributes
+    return xmltodict.unparse(
+        config_root,
+        full_document=True,
+        xml_declaration=True,
+    )
 class ProvisionClient:
     """Client for Provision ISR device."""
 
@@ -189,6 +191,7 @@ class ProvisionClient:
         config = response.get("config", {})
         motion_config = config.get("motion", {})
 
+        # Log the full config for debugging
         _LOGGER.debug("Motion config for channel %s: %s", channel_id, motion_config)
 
         return motion_config
@@ -201,18 +204,18 @@ class ProvisionClient:
         # Grab current configuration
         current_motion = await self.get_motion_config(channel_id)
 
-        # Build the XML payload
+        # Build XML that flips the switch only
         xml = _build_motion_xml(self, current_motion, enabled)
 
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
         response = await self._request(endpoint, method="POST", data=xml)
 
-        # The API may return a 200 with an error code
+        # The API sometimes still returns a 200 but with an error code
         if response.get("code") and response["code"] not in ("0", "200"):
             _LOGGER.warning("SetMotionConfig returned error: %s", response)
             return False
 
-        # Double‑check the new value
+        # Optionally double‑check the new value
         new_cfg = await self.get_motion_config(channel_id)
         new_switch = new_cfg.get("switch", {}).get("#text", "false")
         return new_switch == ("true" if enabled else "false")
@@ -318,6 +321,7 @@ class ProvisionClient:
             Parsed XML as dictionary
         """
         try:
+            # xmltodict preserves attributes with @ prefix
             return xmltodict.parse(xml_text)
         except Exception as err:
             _LOGGER.error("Failed to parse XML: %s", err)
