@@ -1,4 +1,4 @@
-"""Switch platform for Provision ISR integration."""
+"""Switch platform for Provision ISR integration."""
 from __future__ import annotations
 
 import logging
@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -22,7 +22,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Provision ISR switches from a config entry."""
+    """Set up Provision ISR switches from a config entry."""
     client: ProvisionClient = hass.data[DOMAIN][entry.entry_id]["client"]
     device_info: ProvisionDeviceInfo = hass.data[DOMAIN][entry.entry_id]["device_info"]
 
@@ -63,7 +63,7 @@ async def async_setup_entry(
 
 
 class ProvisionMotionSwitch(SwitchEntity):
-    """Representation of a Provision ISR motion detection switch."""
+    """Representation of a Provision ISR motion detection switch."""
 
     _attr_icon = "mdi:motion-sensor"
 
@@ -116,24 +116,22 @@ class ProvisionMotionSwitch(SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
-        # Get current motion detection state
-        try:
-            motion_config = await self._client.get_motion_config(self._channel_id)
-            switch_value = motion_config.get("switch", "false")
-
-            # Handle both boolean and string values
-            self._attr_is_on = (
-                (switch_value is True)
-                or (isinstance(switch_value, str) and switch_value.lower() == "true")
-            )
-
+        # Get current motion detection state using the new helper
+        motion_config = await self._client._get_motion_config(self._channel_id)
+        if motion_config:
+            switch_value = motion_config.get("switch", {}).get("#text", "false")
+            self._attr_is_on = switch_value.lower() == "true"
             _LOGGER.debug(
                 "Motion detection for %s is %s",
                 self._attr_unique_id,
                 "enabled" if self._attr_is_on else "disabled",
             )
-        except Exception as err:
-            _LOGGER.error("Failed to get motion config: %s", err)
+        else:
+            _LOGGER.warning(
+                "Failed to get motion config for %s – assuming disabled",
+                self._attr_unique_id,
+            )
+            self._attr_is_on = False
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable motion detection."""
@@ -141,8 +139,10 @@ class ProvisionMotionSwitch(SwitchEntity):
             changed = await self._client.set_motion_enabled(True, self._channel_id)
             if changed:
                 self._attr_is_on = True
+                # Optional: validate the change after a short delay
+                await self._client.async_time_validate(self._channel_id, timeout_ms=500)
             else:
-                _LOGGER.error("Camera rejected enable motion request")
+                _LOGGER.error("Failed to enable motion detection")
         except Exception as err:
             _LOGGER.exception("Error enabling motion detection: %s", err)
         finally:
@@ -154,8 +154,9 @@ class ProvisionMotionSwitch(SwitchEntity):
             changed = await self._client.set_motion_enabled(False, self._channel_id)
             if changed:
                 self._attr_is_on = False
+                await self._client.async_time_validate(self._channel_id, timeout_ms=500)
             else:
-                _LOGGER.error("Camera rejected disable motion request")
+                _LOGGER.error("Failed to disable motion detection")
         except Exception as err:
             _LOGGER.exception("Error disabling motion detection: %s", err)
         finally:
