@@ -1,6 +1,7 @@
 """Provision ISR API Client."""
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -26,11 +27,31 @@ from .models import DeviceInfo, ChannelList, DiskInfo, StreamCaps, StreamInfo
 
 _LOGGER = logging.getLogger(__name__)
 
+# ----------------------------------------------------------------------
+# Helper – build a full <config> XML from a motion‑config dictionary
+# ----------------------------------------------------------------------
+def _motion_cfg_to_xml(self, cfg: dict[str, Any], enabled: bool) -> str:
+    """Return a <config> XML document built from a motion config dict."""
+    cfg_copy = copy.deepcopy(cfg)
 
-# ----------------------------------------------------------------------
-# No longer need a helper that copies the motion dict – the server
-# requires an XML that exactly matches what it returns for GetMotionConfig.
-# ----------------------------------------------------------------------
+    # Toggle the <switch> value
+    if "switch" in cfg_copy:
+        if isinstance(cfg_copy["switch"], dict):
+            cfg_copy["switch"]["#text"] = "true" if enabled else "false"
+        else:
+            cfg_copy["switch"] = {"#text": "true" if enabled else "false"}
+
+    # Build the <config> root using the same version/namespace that the device sent
+    root = {
+        "config": {
+            "@version": cfg_copy.get("@version", "1.7"),
+            "@xmlns": cfg_copy.get("@xmlns", "http://www.ipc.com/ver10"),
+            "motion": cfg_copy,
+        }
+    }
+
+    body = xmltodict.unparse(root, full_document=False)
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n{body}'
 
 
 class ProvisionClient:
@@ -51,9 +72,9 @@ class ProvisionClient:
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Connection helpers
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     async def connect(self) -> bool:
         """Test connection and authentication."""
         try:
@@ -88,9 +109,9 @@ class ProvisionClient:
             )
         return self._client
 
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Device‑info helpers
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     async def get_device_info(self) -> DeviceInfo:
         response = await self._request("GetDeviceInfo")
         config = response.get("config", {})
@@ -131,9 +152,18 @@ class ProvisionClient:
         except httpx.RequestError as err:
             raise ProvisionConnectionError(f"Snapshot failed: {err}") from err
 
-    # ----------------------------------------------------------------------
-    # Motion‑config helpers
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Helper for motion‑config retrieval with error guard
+    # ------------------------------------------------------------------
+    async def _get_motion_config(self, channel_id: int = 1) -> dict[str, Any] | None:
+        try:
+            return await self.get_motion_config(channel_id)
+        except Exception as err:
+            _LOGGER.warning(
+                "Failed to get motion config (channel %s): %s", channel_id, err
+            )
+            return None
+
     async def get_motion_config(self, channel_id: int = 1) -> dict[str, Any]:
         """Return the motion configuration dict (just the <motion> node)."""
         endpoint = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
@@ -142,64 +172,36 @@ class ProvisionClient:
 
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
         """Enable or disable motion detection.
-
-        The payload must be the exact XML that the device returns from GetMotionConfig,
-        except the <switch> text is toggled.
+        Returns True when the switch is successfully toggled.
         """
-        switch_val = "true" if enabled else "false"
+        # Grab current configuration
+        motion_cfg = await self._get_motion_config(channel_id)
+        if not motion_cfg:
+            return False
 
-        xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?>
-<config version="1.0" xmlns="http://www.ipc.com/ver10">
-<motion>
-<switch type="boolean">{switch_val}</switch>
-<sensitivity type="int32" min="0" max="8">4</sensitivity>
-<alarmHoldTime type="uint32">20</alarmHoldTime>
-<area type="list" count="18">
-<itemType type="string" minLen="22" maxLen="22"/>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-<item><![CDATA[1111111111111111111111]]></item>
-</area>
-<triggerAlarmOut type="list" count="1">
-<itemType type="boolean"/>
-<item id="1">false</item>
-</triggerAlarmOut>
-</motion>
-</config>"""
+        # Build XML payload using the helper
+        xml_payload = _motion_cfg_to_xml(self, motion_cfg, enabled)
 
         _LOGGER.debug("Sending SetMotionConfig XML: %s", xml_payload)
 
         endpoint = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
         await self._request(endpoint, method="POST", data=xml_payload)
 
-        # Verify that the switch state changed
-        new_cfg = await self.get_motion_config(channel_id)
+        # Verify new state
+        new_cfg = await self._get_motion_config(channel_id)
+        if not new_cfg:
+            return False
         new_switch = new_cfg.get("switch", {}).get("#text", "false")
-        return new_switch == switch_val
+        return new_switch == ("true" if enabled else "false")
 
     async def get_alarm_status(self) -> dict[str, Any]:
         """Get current alarm status."""
         response = await self._request("GetAlarmStatus")
         return response.get("config", {}).get("alarmStatusInfo", {})
 
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Generic request/response handling
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     async def _request(
         self,
         endpoint: str,
@@ -265,7 +267,7 @@ class ProvisionClient:
         error_map = {
             "1": InvalidRequestError("Invalid request URL or parameters"),
             "2": InvalidXMLFormatError("Invalid XML format"),
-            "3": InvalidXMLContentError("Invalid XML content or out‑of-range parameters"),
+            "3": InvalidXMLContentError("Invalid XML content or out-of-range parameters"),
             "4": PermissionDeniedError("Permission denied"),
             "5": ProvisionError("Network port number error"),
         }
@@ -273,9 +275,34 @@ class ProvisionClient:
         exception = error_map.get(error_code, ProvisionError(f"Unknown error code: {error_code}"))
         raise exception
 
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Async time‑validate routine (optional)
+    # ------------------------------------------------------------------
+    async def async_time_validate(self, channel_id: int = 1, timeout_ms: int = 500) -> bool:
+        """Re‑read GetMotionConfig after a short pause to confirm state.
+
+        Returns True if the switch value matches the one returned by the last
+        call to `set_motion_enabled`.
+        """
+        try:
+            cfg_before = await self.get_motion_config(channel_id)
+            if not cfg_before:
+                _LOGGER.warning("async_time_validate: no config for channel %s", channel_id)
+                return False
+            # Wait a moment for the device to apply the change
+            await asyncio.sleep(timeout_ms / 1000)
+            cfg_after = await self.get_motion_config(channel_id)
+            return (
+                cfg_after.get("switch", {}).get("#text", "false")
+                == cfg_before.get("switch", {}).get("#text", "false")
+            )
+        except Exception as err:
+            _LOGGER.error("async_time_validate error: %s", err)
+            return False
+
+    # ------------------------------------------------------------------
     # Async context manager support
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     async def __aenter__(self) -> "ProvisionClient":
         await self.connect()
         return self
