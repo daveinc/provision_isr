@@ -139,8 +139,6 @@ class ProvisionMotionSwitch(SwitchEntity):
             changed = await self._client.set_motion_enabled(True, self._channel_id)
             if changed:
                 self._attr_is_on = True
-                # Optional: validate the change after a short delay
-                await self._client.async_time_validate(self._channel_id, timeout_ms=500)
             else:
                 _LOGGER.error("Failed to enable motion detection")
         except Exception as err:
@@ -154,7 +152,6 @@ class ProvisionMotionSwitch(SwitchEntity):
             changed = await self._client.set_motion_enabled(False, self._channel_id)
             if changed:
                 self._attr_is_on = False
-                await self._client.async_time_validate(self._channel_id, timeout_ms=500)
             else:
                 _LOGGER.error("Failed to disable motion detection")
         except Exception as err:

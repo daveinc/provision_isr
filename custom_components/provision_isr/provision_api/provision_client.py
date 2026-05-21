@@ -130,7 +130,7 @@ class ProvisionClient:
             raise ValueError(f"Unknown command: {cmd_name}")
 
         spec = commands[cmd_name]
-        endpoint = spec["endpoint"].format(channel_id=channel_id)
+        endpoint = spec["endpoint"].lstrip("/").format(channel_id=channel_id)
 
         # start with a deep copy of the dict that the device sent
         payload = copy.deepcopy(spec["dict_repr"])
@@ -173,8 +173,30 @@ class ProvisionClient:
     # ------------------------------------------------------------------
     # High‑level convenience wrappers
     # ------------------------------------------------------------------
+    async def _get_motion_config(self, channel_id: int = 1) -> Dict[str, Any]:
+        """Return the raw motion config dict for a channel."""
+        ep = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
+        return (await self._request(ep)).get("config", {}).get("motion", {})
+
     async def set_motion_enabled(self, enabled: bool, channel_id: int = 1) -> bool:
-        return await self._execute("GetMotionConfig", toggle=enabled, channel_id=channel_id)
+        """Enable or disable motion detection via read-modify-write."""
+        get_ep = f"GetMotionConfig/{channel_id}" if channel_id > 1 else "GetMotionConfig"
+        raw = await self._request(get_ep)
+        payload = copy.deepcopy(raw)
+
+        # Modify the switch field inside the live config
+        try:
+            payload["config"]["motion"]["switch"] = {"#text": "true" if enabled else "false"}
+        except KeyError:
+            _LOGGER.error("Unexpected GetMotionConfig response structure")
+            return False
+
+        xml_body = xmltodict.unparse(payload, full_document=False)
+        xml_payload = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_body}'
+
+        post_ep = f"SetMotionConfig/{channel_id}" if channel_id > 1 else "SetMotionConfig"
+        await self._request(post_ep, method="POST", data=xml_payload)
+        return True
 
     async def toggle_audio(self, enable: bool, channel_id: int = 1) -> bool:
         return await self._execute("ToggleAudio", toggle=enable, channel_id=channel_id)
