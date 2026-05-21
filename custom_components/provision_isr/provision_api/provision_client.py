@@ -226,9 +226,14 @@ class ProvisionClient:
             else:
                 r = await client.get(url)
 
+            if r.status_code == HTTP_UNAUTHORIZED:
+                raise AuthenticationError("Bad credentials")
+
             r.raise_for_status()
             return xmltodict.parse(r.text)
 
+        except AuthenticationError:
+            raise
         except httpx.HTTPError as ex:
             raise ProvisionConnectionError(f"HTTP error: {ex}") from ex
 

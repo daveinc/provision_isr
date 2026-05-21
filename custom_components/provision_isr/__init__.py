@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import CONF_AUTO_DETECT_IP, CONF_MAC_ADDRESS, DOMAIN
+from .coordinator import ProvisionDataUpdateCoordinator
 from .provision_api import ProvisionClient
 from .provision_api.exceptions import AuthenticationError, ConnectionError
 
@@ -67,11 +68,16 @@ async def async_setup_entry(
         _LOGGER.exception("Unexpected error during setup")
         raise ConfigEntryNotReady(f"Setup failed: {err}") from err
 
-    # Store client & device info
+    # Create coordinator
+    coordinator = ProvisionDataUpdateCoordinator(hass, client, device_info)
+    await coordinator.async_config_entry_first_refresh()
+
+    # Store coordinator & client
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
         "device_info": device_info,
+        "coordinator": coordinator,
     }
 
     # Start long polling if supported
